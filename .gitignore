@@ -1,0 +1,6 @@
+__pycache__/
+log/
+models/
+plots/
+tensorboard_logs/
+videos/
