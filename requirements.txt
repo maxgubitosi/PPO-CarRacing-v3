@@ -28,6 +28,9 @@ tqdm>=4.65.0
 # Hyperparameter Tuning
 optuna>=3.3.0
 
+# Pin setuptools to avoid pygame deprecation warning
+setuptools<81
+
 # Additional dependencies
 cloudpickle>=1.2.0
 farama-notifications>=0.0.1
