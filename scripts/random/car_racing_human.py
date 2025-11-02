@@ -13,8 +13,12 @@ import numpy as np
 import pygame
 import gymnasium as gym
 import csv
-import os
+from pathlib import Path
 from datetime import datetime
+
+
+ROOT_DIR = Path(__file__).resolve().parents[2]
+RESULTS_FILE = ROOT_DIR / "results" / "log" / "human_play_results.csv"
 
 def get_player_name(screen):
     """Pide el nombre del jugador."""
@@ -116,15 +120,15 @@ def show_menu(screen, episode_stats=None):
         clock.tick(60)
 
 
-def save_stats_to_csv(stats, filename="results/log/human_play_results.csv"):
+def save_stats_to_csv(stats, filename=RESULTS_FILE):
     """Guarda las estadísticas del episodio en un archivo CSV."""
-    # Crear directorio si no existe
-    os.makedirs(os.path.dirname(filename), exist_ok=True)
+    filename = Path(filename)
+    filename.parent.mkdir(parents=True, exist_ok=True)
     
     # Verificar si el archivo ya existe para agregar headers
-    file_exists = os.path.isfile(filename)
+    file_exists = filename.exists()
     
-    with open(filename, 'a', newline='') as csvfile:
+    with filename.open('a', newline='') as csvfile:
         fieldnames = ['timestamp', 'player_name', 'total_reward', 'steps', 
                       'avg_reward_per_step', 'termination_reason']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
