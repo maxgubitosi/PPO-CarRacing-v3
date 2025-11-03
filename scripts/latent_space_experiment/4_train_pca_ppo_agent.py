@@ -46,6 +46,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--resize-height", type=int, default=48)
     parser.add_argument("--resize-width", type=int, default=48)
     parser.add_argument("--ridge-lambda", type=float, default=1e-3)
+    parser.add_argument(
+        "--log-root",
+        type=Path,
+        default=Path("scripts/latent_space_experiment/tensorboard_logs/ppo_latent"),
+        help="Directory (relative to repo root) where TensorBoard logs for the latent PPO run are stored.",
+    )
+    parser.add_argument(
+        "--checkpoint-root",
+        type=Path,
+        default=Path("scripts/latent_space_experiment/models/pca_ppo_runs"),
+        help="Directory for saving PCA PPO checkpoints.",
+    )
+    parser.add_argument(
+        "--video-root",
+        type=Path,
+        default=Path("scripts/latent_space_experiment/videos/ppo_latent"),
+        help="Directory for saving PCA PPO policy videos.",
+    )
     parser.add_argument("--no-eval", action="store_true")
     return parser.parse_args()
 
@@ -95,6 +113,9 @@ def main() -> None:
         resize_height=args.resize_height,
         resize_width=args.resize_width,
         ridge_lambda=args.ridge_lambda,
+        log_root=args.log_root,
+        checkpoint_root=args.checkpoint_root,
+        video_root=args.video_root,
     )
 
     trainer = PCAPPOTrainer(config)
