@@ -22,7 +22,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-steps", type=int, default=512)
     parser.add_argument("--num-minibatches", type=int, default=8)
     parser.add_argument("--update-epochs", type=int, default=8)
-    parser.add_argument("--learning-rate", type=float, default=3e-4)
+    parser.add_argument("--learning-rate", type=float, default=5e-5)
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--gae-lambda", type=float, default=0.95)
     parser.add_argument("--clip-coef", type=float, default=0.2)
@@ -40,6 +40,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--video-interval-minutes", type=float, default=10.0)
     parser.add_argument("--max-video-steps", type=int, default=1000)
     parser.add_argument("--no-video", action="store_true")
+    parser.add_argument("--max-offroad-seconds", type=float, default=2.0)
+    parser.add_argument("--offroad-penalty", type=float, default=None, nargs="?")
     parser.add_argument("--resume" , type=str, default=None, help="Checkpoint (.pt) path to resume from")
     return parser.parse_args()
 
@@ -79,6 +81,8 @@ def main() -> None:
         save_interval=args.save_interval,
         video_interval_minutes=None if args.no_video else args.video_interval_minutes,
         max_video_steps=args.max_video_steps,
+        max_offroad_seconds=args.max_offroad_seconds,
+        offroad_penalty=args.offroad_penalty,
     )
 
     trainer = PPOTrainer(config)

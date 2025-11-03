@@ -24,6 +24,10 @@ class ActorCritic(nn.Module):
             nn.ReLU(),
             nn.Conv2d(32, 64, kernel_size=3, stride=2),
             nn.ReLU(),
+            nn.Conv2d(64, 128, kernel_size=3, stride=2),
+            nn.ReLU(),
+            nn.Conv2d(128, 128, kernel_size=3, stride=2),
+            nn.ReLU(),
             nn.Flatten(),
         )
 
@@ -31,7 +35,7 @@ class ActorCritic(nn.Module):
             dummy = torch.zeros(1, c, h, w)
             feature_dim = self.feature_extractor(dummy).shape[-1]
 
-        hidden_dim = 256
+        hidden_dim = 128
 
         self.actor = nn.Sequential(
             nn.Linear(feature_dim, hidden_dim),

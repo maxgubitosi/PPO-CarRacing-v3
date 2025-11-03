@@ -1,4 +1,16 @@
-from .carracing import CarRacingPreprocess, create_single_env, create_vector_env
+from .carracing import (
+    CarRacingPreprocess,
+    FrameStackWrapper,
+    OffRoadPenaltyWrapper,
+    create_single_env,
+    create_vector_env,
+)
 
-__all__ = ["CarRacingPreprocess", "create_single_env", "create_vector_env"]
+__all__ = [
+    "CarRacingPreprocess",
+    "FrameStackWrapper",
+    "OffRoadPenaltyWrapper",
+    "create_single_env",
+    "create_vector_env",
+]
 

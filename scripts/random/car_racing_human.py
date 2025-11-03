@@ -9,6 +9,14 @@
 #   Q o ESC para salir, R para resetear episodio.
 ##########################################################################
 
+import warnings
+
+warnings.filterwarnings(
+    "ignore",
+    message="pkg_resources is deprecated as an API",
+    module="pygame.pkgdata",
+)
+
 import numpy as np
 import pygame
 import gymnasium as gym

@@ -33,8 +33,24 @@ class PPOTrainer:
 
         set_seed(config.seed, deterministic=config.torch_deterministic)
 
-        self.env = create_vector_env(config.env_id, config.num_envs, config.seed)
-        self.eval_env = create_single_env(config.env_id, config.seed + 10, render_mode=None) if config.track_eval else None
+        self.env = create_vector_env(
+            config.env_id,
+            config.num_envs,
+            config.seed,
+            offroad_penalty=config.offroad_penalty,
+            max_offroad_seconds=config.max_offroad_seconds,
+        )
+        self.eval_env = (
+            create_single_env(
+                config.env_id,
+                config.seed + 10,
+                render_mode=None,
+                offroad_penalty=config.offroad_penalty,
+                max_offroad_seconds=config.max_offroad_seconds,
+            )
+            if config.track_eval
+            else None
+        )
 
         obs_space = self.env.single_observation_space
         action_space = self.env.single_action_space

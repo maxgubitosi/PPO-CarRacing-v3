@@ -17,7 +17,7 @@ class PPOConfig:
     clip_coef: float = 0.2
     ent_coef: float = 0.01
     value_coef: float = 0.5
-    learning_rate: float = 3e-4
+    learning_rate: float = 5e-5
     max_grad_norm: float = 0.5
     target_kl: float | None = None
     seed: int = 42
@@ -33,6 +33,8 @@ class PPOConfig:
     video_root: Path = field(default_factory=lambda: Path("videos/ppo_clip"))
     video_interval_minutes: float | None = 10.0
     max_video_steps: int = 1000
+    max_offroad_seconds: float = 2.0
+    offroad_penalty: float | None = None
 
     def __post_init__(self) -> None:
         if self.video_interval_minutes is not None and self.video_interval_minutes <= 0:
@@ -40,6 +42,9 @@ class PPOConfig:
 
         if self.max_video_steps <= 0:
             raise ValueError("max_video_steps must be positive")
+
+        if self.max_offroad_seconds <= 0:
+            raise ValueError("max_offroad_seconds must be positive")
 
         try:
             import torch
