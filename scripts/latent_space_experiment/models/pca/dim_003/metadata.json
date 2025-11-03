@@ -1,0 +1,22 @@
+{
+  "latent_dim": 3,
+  "n_samples": 51234,
+  "batch_size": 512,
+  "max_dim_trained": 32,
+  "explained_variance_ratio": [
+    0.1767647098811778,
+    0.1507832401824344,
+    0.07077307636808848
+  ],
+  "total_explained_variance": 0.3983210264317007,
+  "singular_values": [
+    747.1611887243562,
+    690.0698577098442,
+    472.77070620304585
+  ],
+  "crop_ratio": 0.13,
+  "target_size": [
+    48,
+    48
+  ]
+}
