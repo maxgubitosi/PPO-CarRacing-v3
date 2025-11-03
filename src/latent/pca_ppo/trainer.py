@@ -24,7 +24,7 @@ class PCAPPOTrainer:
     def __init__(self, config: PCAPPOConfig) -> None:
         self.config = config
         self.device = torch.device(config.device)
-        self.project_root = Path(__file__).resolve().parents[2]
+        self.project_root = Path(__file__).resolve().parents[3]
 
         set_seed(config.seed, deterministic=config.torch_deterministic)
 
