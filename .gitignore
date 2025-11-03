@@ -5,3 +5,5 @@ models/
 plots/
 tensorboard_logs/
 videos/
+!scripts/latent_space_experiment/models/pca/
+!scripts/latent_space_experiment/models/pca/**

@@ -40,10 +40,12 @@ class PPOTrainer:
             offroad_penalty=config.offroad_penalty,
             max_offroad_seconds=config.max_offroad_seconds,
         )
+        self.eval_env_seeds = [config.seed + 10 + i for i in range(config.eval_episodes)]
+        self.eval_env_index = 0
         self.eval_env = (
             create_single_env(
                 config.env_id,
-                config.seed + 10,
+                self.eval_env_seeds[self.eval_env_index],
                 render_mode=None,
                 offroad_penalty=config.offroad_penalty,
                 max_offroad_seconds=config.max_offroad_seconds,
@@ -196,8 +198,11 @@ class PPOTrainer:
         returns = []
         lengths = []
 
-        for episode in range(self.config.eval_episodes):
-            obs, _ = self.eval_env.reset()
+        for idx in range(self.config.eval_episodes):
+            seed = self.eval_env_seeds[self.eval_env_index]
+            self.eval_env_index = (self.eval_env_index + 1) % len(self.eval_env_seeds)
+
+            obs, _ = self.eval_env.reset(seed=seed)
             done = False
             total_reward = 0.0
             steps = 0
@@ -231,9 +236,15 @@ class PPOTrainer:
         )
 
     def _record_video(self, global_step: int) -> None:
-        env_seed = self.config.seed + self._video_seed_offset
-        self._video_seed_offset += 1
-        env = create_single_env(self.config.env_id, env_seed, render_mode="rgb_array")
+        env_seed = self.eval_env_seeds[self.eval_env_index]
+        self.eval_env_index = (self.eval_env_index + 1) % len(self.eval_env_seeds)
+        env = create_single_env(
+            self.config.env_id,
+            env_seed,
+            render_mode="rgb_array",
+            offroad_penalty=self.config.offroad_penalty,
+            max_offroad_seconds=self.config.max_offroad_seconds,
+        )
 
         frames = []
         obs, _ = env.reset()
