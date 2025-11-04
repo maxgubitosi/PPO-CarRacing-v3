@@ -173,16 +173,24 @@ def _make_env(
     *,
     offroad_penalty: float | None,
     max_offroad_seconds: float = 2.0,
-    action_wrapper_name: str = "continuous",
+    continuous: bool = True,
 ) -> Callable[[], gym.Env]:
+    """
+    Crea un environment CarRacing-v3.
+    
+    Args:
+        continuous: Si True, usa acciones continuas Box(3,). 
+                   Si False, usa acciones discretas Discrete(5) nativas del environment.
+    """
     def thunk() -> gym.Env:
-        env = gym.make(env_id, render_mode=render_mode)
-        
-        # Aplicar action wrapper PRIMERO (antes de otros wrappers)
-        if action_wrapper_name != "continuous":
-            from action_spaces import get_action_wrapper
-            action_wrapper_cls = get_action_wrapper(action_wrapper_name)
-            env = action_wrapper_cls(env)
+        # Crear environment con el parámetro continuous nativo
+        env = gym.make(
+            env_id, 
+            render_mode=render_mode,
+            continuous=continuous,
+            lap_complete_percent=0.95,
+            domain_randomize=False,
+        )
         
         env = CarRacingPreprocess(env)
         env = FrameStackWrapper(env, num_stack=4)
@@ -206,7 +214,7 @@ def create_vector_env(
     *,
     offroad_penalty: float | None = None,
     max_offroad_seconds: float = 2.0,
-    action_wrapper_name: str = "continuous",
+    continuous: bool = True,
 ) -> gym.Env:
     env_fns = [
         _make_env(
@@ -215,7 +223,7 @@ def create_vector_env(
             render_mode if render_mode and idx == 0 else None,
             offroad_penalty=offroad_penalty,
             max_offroad_seconds=max_offroad_seconds,
-            action_wrapper_name=action_wrapper_name,
+            continuous=continuous,
         )
         for idx in range(num_envs)
     ]
@@ -231,7 +239,7 @@ def create_single_env(
     *,
     offroad_penalty: float | None = None,
     max_offroad_seconds: float = 2.0,
-    action_wrapper_name: str = "continuous",
+    continuous: bool = True,
 ) -> gym.Env:
     return _make_env(
         env_id,
@@ -239,7 +247,7 @@ def create_single_env(
         render_mode,
         offroad_penalty=offroad_penalty,
         max_offroad_seconds=max_offroad_seconds,
-        action_wrapper_name=action_wrapper_name,
+        continuous=continuous,
     )()
 
 

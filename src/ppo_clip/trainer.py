@@ -39,7 +39,7 @@ class PPOTrainer:
             config.seed,
             offroad_penalty=config.offroad_penalty,
             max_offroad_seconds=config.max_offroad_seconds,
-            action_wrapper_name=config.action_wrapper,
+            continuous=config.continuous,
         )
         self.eval_env_seeds = [config.seed + 10 + i for i in range(config.eval_episodes)]
         self.eval_env_index = 0
@@ -50,7 +50,7 @@ class PPOTrainer:
                 render_mode=None,
                 offroad_penalty=config.offroad_penalty,
                 max_offroad_seconds=config.max_offroad_seconds,
-                action_wrapper_name=config.action_wrapper,
+                continuous=config.continuous,
             )
             if config.track_eval
             else None
@@ -252,7 +252,7 @@ class PPOTrainer:
             render_mode="rgb_array",
             offroad_penalty=self.config.offroad_penalty,
             max_offroad_seconds=self.config.max_offroad_seconds,
-            action_wrapper_name=self.config.action_wrapper,
+            continuous=self.config.continuous,
         )
 
         frames = []
