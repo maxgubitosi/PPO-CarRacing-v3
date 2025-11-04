@@ -5,10 +5,10 @@ from typing import Any, Dict
 
 import torch
 import torch.nn.functional as F
-from gymnasium.spaces import Box
+from gymnasium.spaces import Box, Discrete, Space
 
 from .config import PPOConfig
-from .networks import ActorCritic
+from .networks_factory import create_actor_critic
 from .rollout_buffer import RolloutBatch
 
 
@@ -22,20 +22,33 @@ class UpdateStats:
 
 
 class PPOClipAgent:
-    def __init__(self, observation_space: Box, action_space: Box, config: PPOConfig) -> None:
+    def __init__(self, observation_space: Space, action_space: Space, config: PPOConfig) -> None:
         self.config = config
         self.device = torch.device(config.device)
-        self.network = ActorCritic(observation_space, action_space).to(self.device)
+        self.network = create_actor_critic(observation_space, action_space).to(self.device)
         self.optimizer = torch.optim.Adam(self.network.parameters(), lr=config.learning_rate, eps=1e-5)
+        self.is_discrete = isinstance(action_space, Discrete)
 
     def sample(self, obs: torch.Tensor) -> Dict[str, torch.Tensor]:
-        scaled_action, log_prob, value, raw_action = self.network.act(obs)
-        return {
-            "action": scaled_action,
-            "log_prob": log_prob,
-            "value": value,
-            "raw_action": raw_action,
-        }
+        """Muestrea una acción de la política."""
+        if self.is_discrete:
+            # Para acciones discretas
+            action, log_prob, value = self.network.act(obs)
+            return {
+                "action": action,
+                "log_prob": log_prob,
+                "value": value,
+                "raw_action": action,  # Para discrete, raw es igual a action
+            }
+        else:
+            # Para acciones continuas
+            scaled_action, log_prob, value, raw_action = self.network.act(obs)
+            return {
+                "action": scaled_action,
+                "log_prob": log_prob,
+                "value": value,
+                "raw_action": raw_action,
+            }
 
     def evaluate(self, obs: torch.Tensor, actions: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         return self.network.evaluate_actions(obs, actions)

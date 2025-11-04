@@ -35,6 +35,7 @@ class PPOConfig:
     max_video_steps: int = 1000
     max_offroad_seconds: float = 2.0
     offroad_penalty: float | None = None
+    action_wrapper: str = "continuous"  # Opciones: "continuous", "discrete_5"
 
     def __post_init__(self) -> None:
         if self.video_interval_minutes is not None and self.video_interval_minutes <= 0:
@@ -45,6 +46,15 @@ class PPOConfig:
 
         if self.max_offroad_seconds <= 0:
             raise ValueError("max_offroad_seconds must be positive")
+        
+        # Validar action_wrapper
+        from action_spaces import list_action_wrappers
+        available_wrappers = list_action_wrappers()
+        if self.action_wrapper not in available_wrappers:
+            raise ValueError(
+                f"Invalid action_wrapper '{self.action_wrapper}'. "
+                f"Available options: {available_wrappers}"
+            )
 
         try:
             import torch

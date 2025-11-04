@@ -39,6 +39,7 @@ class PPOTrainer:
             config.seed,
             offroad_penalty=config.offroad_penalty,
             max_offroad_seconds=config.max_offroad_seconds,
+            action_wrapper_name=config.action_wrapper,
         )
         self.eval_env_seeds = [config.seed + 10 + i for i in range(config.eval_episodes)]
         self.eval_env_index = 0
@@ -49,6 +50,7 @@ class PPOTrainer:
                 render_mode=None,
                 offroad_penalty=config.offroad_penalty,
                 max_offroad_seconds=config.max_offroad_seconds,
+                action_wrapper_name=config.action_wrapper,
             )
             if config.track_eval
             else None
@@ -59,12 +61,18 @@ class PPOTrainer:
 
         self.agent = PPOClipAgent(obs_space, action_space, config)
 
+        # Detectar si el espacio de acción es discreto
+        from gymnasium.spaces import Discrete
+        is_discrete = isinstance(action_space, Discrete)
+        action_dim = action_space.n if is_discrete else int(np.prod(action_space.shape))
+
         self.buffer = RolloutBuffer(
             num_steps=config.num_steps,
             num_envs=config.num_envs,
             obs_shape=obs_space.shape,
-            action_dim=int(np.prod(action_space.shape)),
+            action_dim=action_dim,
             device=self.device,
+            is_discrete=is_discrete,
         )
 
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -244,6 +252,7 @@ class PPOTrainer:
             render_mode="rgb_array",
             offroad_penalty=self.config.offroad_penalty,
             max_offroad_seconds=self.config.max_offroad_seconds,
+            action_wrapper_name=self.config.action_wrapper,
         )
 
         frames = []

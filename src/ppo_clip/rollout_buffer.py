@@ -24,15 +24,24 @@ class RolloutBuffer:
         obs_shape: tuple[int, ...],
         action_dim: int,
         device: torch.device,
+        is_discrete: bool = False,
     ) -> None:
         self.num_steps = num_steps
         self.num_envs = num_envs
         self.device = device
+        self.is_discrete = is_discrete
 
         buffer_shape = (num_steps, num_envs)
 
         self.observations = torch.zeros(buffer_shape + obs_shape, device=device)
-        self.actions = torch.zeros(buffer_shape + (action_dim,), device=device)
+        
+        # Para acciones discretas: shape (num_steps, num_envs)
+        # Para acciones continuas: shape (num_steps, num_envs, action_dim)
+        if is_discrete:
+            self.actions = torch.zeros(buffer_shape, dtype=torch.long, device=device)
+        else:
+            self.actions = torch.zeros(buffer_shape + (action_dim,), device=device)
+        
         self.log_probs = torch.zeros(buffer_shape, device=device)
         self.rewards = torch.zeros(buffer_shape, device=device)
         self.dones = torch.zeros(buffer_shape, device=device)
@@ -55,7 +64,19 @@ class RolloutBuffer:
             raise IndexError("RolloutBuffer is full")
 
         self.observations[self._step].copy_(obs)
-        self.actions[self._step].copy_(action)
+        
+        # Manejo de acciones discretas vs continuas
+        if self.is_discrete:
+            # Acciones discretas: shape (num_envs,)
+            if action.dim() == 1:
+                self.actions[self._step].copy_(action)
+            else:
+                # Si viene con batch dimension extra, hacer squeeze
+                self.actions[self._step].copy_(action.squeeze(-1))
+        else:
+            # Acciones continuas: shape (num_envs, action_dim)
+            self.actions[self._step].copy_(action)
+        
         self.log_probs[self._step].copy_(log_prob)
         self.rewards[self._step].copy_(reward)
         self.dones[self._step].copy_(done)
@@ -95,7 +116,15 @@ class RolloutBuffer:
         indices = torch.randperm(num_samples, device=self.device)
 
         observations = self.observations.reshape(num_samples, *self.observations.shape[2:])
-        actions = self.actions.reshape(num_samples, -1)
+        
+        # Manejo de acciones discretas vs continuas
+        if self.is_discrete:
+            # Acciones discretas: mantener shape (num_samples,)
+            actions = self.actions.reshape(num_samples)
+        else:
+            # Acciones continuas: shape (num_samples, action_dim)
+            actions = self.actions.reshape(num_samples, -1)
+        
         log_probs = self.log_probs.reshape(num_samples)
         advantages = self.advantages.reshape(num_samples)
         returns = self.returns.reshape(num_samples)

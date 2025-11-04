@@ -7,7 +7,9 @@ from torch import nn
 from torch.distributions import Normal
 
 
-class ActorCritic(nn.Module):
+class ContinuousActorCritic(nn.Module):
+    """Actor-Critic para espacios de acción continuos (Box)."""
+    
     def __init__(self, observation_space: Box, action_space: Box) -> None:
         super().__init__()
         if len(observation_space.shape) != 3:
