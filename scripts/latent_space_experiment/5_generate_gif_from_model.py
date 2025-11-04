@@ -20,7 +20,7 @@ if str(SRC_DIR) not in sys.path:
 
 from latent.pca_ppo import PCAPPOConfig  # noqa: E402
 from latent.pca_ppo.agent import PCAPPOAgent  # noqa: E402
-from latent.pca_ppo.env import create_pca_single_env  # noqa: E402
+from latent.pca_ppo.env import PCAObservationWrapper, create_pca_single_env  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -56,6 +56,11 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=30,
         help="Frames per second for the resulting GIF.",
+    )
+    parser.add_argument(
+        "--compare-reconstruction",
+        action="store_true",
+        help="If set, concatenates the PCA reconstruction next to the raw frame.",
     )
     return parser.parse_args()
 
@@ -128,7 +133,7 @@ def main() -> None:
     obs, _ = env.reset(seed=args.seed)
     frame = env.render()
     if frame is not None:
-        frames.append(_prepare_frame(frame))
+        frames.append(_prepare_frame(frame, env, args.compare_reconstruction))
 
     done = False
     steps = 0
@@ -141,7 +146,7 @@ def main() -> None:
         done = terminated or truncated
         frame = env.render()
         if frame is not None:
-            frames.append(_prepare_frame(frame))
+            frames.append(_prepare_frame(frame, env, args.compare_reconstruction))
         steps += 1
 
     env.close()
@@ -153,13 +158,48 @@ def main() -> None:
     print(f"Saved GIF to {output_path}")
 
 
-def _prepare_frame(frame: np.ndarray) -> np.ndarray:
+def _prepare_frame(frame: np.ndarray, env: Any, compare: bool) -> np.ndarray:
     array = np.asarray(frame)
     if array.dtype != np.uint8:
         if array.max(initial=0.0) <= 1.0:
             array = array * 255.0
         array = np.clip(array, 0, 255).astype(np.uint8)
-    return array
+
+    if not compare:
+        return array
+
+    wrapper = _find_pca_wrapper(env)
+    if wrapper is None:
+        return array
+
+    latent_stack = getattr(wrapper, "_latent_stack", None)
+    if not latent_stack:
+        return array
+
+    latest_latent = latent_stack[-1]
+    recon = wrapper.reconstruct_from_latent(latest_latent)
+    recon_rgb = (recon * 255.0).clip(0, 255).astype(np.uint8)
+    recon_rgb = _ensure_three_channels(recon_rgb)
+    recon_rgb = cv2.resize(recon_rgb, (array.shape[1], array.shape[0]))
+    combined = np.concatenate([array, recon_rgb], axis=1)
+    return combined
+
+
+def _find_pca_wrapper(env: Any) -> PCAObservationWrapper | None:
+    current = env
+    while current is not None:
+        if isinstance(current, PCAObservationWrapper):
+            return current
+        current = getattr(current, "env", None)
+    return None
+
+
+def _ensure_three_channels(image: np.ndarray) -> np.ndarray:
+    if image.ndim == 2:
+        return np.stack([image] * 3, axis=-1)
+    if image.shape[2] == 1:
+        return np.repeat(image, 3, axis=2)
+    return image
 
 
 if __name__ == "__main__":
