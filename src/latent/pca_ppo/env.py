@@ -95,6 +95,16 @@ class PCAObservationWrapper(gym.Wrapper):
         latent = self._pca.transform(flat).astype(np.float32)
         return latent.squeeze(0)
 
+    def reconstruct_from_latent(self, latent: np.ndarray) -> np.ndarray:
+        latent = np.asarray(latent, dtype=np.float32)
+        if latent.shape[0] > self.latent_dim:
+            latent = latent[-self.latent_dim :]
+        latent = latent.reshape(1, -1)
+        reconstruction = self._pca.inverse_transform(latent)
+        reconstruction = reconstruction.reshape(self.target_height, self.target_width, 3)
+        reconstruction = np.clip(reconstruction, 0.0, 1.0)
+        return reconstruction
+
     def _detect_offroad(self, frame: np.ndarray) -> tuple[bool, float]:
         frame_norm = frame.astype(np.float32) / 255.0
         red = frame_norm[..., 0]
