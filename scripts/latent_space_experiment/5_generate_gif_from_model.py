@@ -8,6 +8,7 @@ from typing import Any, Dict
 import imageio.v2 as imageio
 import numpy as np
 import torch
+import cv2
 try:
     from torch.serialization import add_safe_globals
 except ImportError:  # pragma: no cover - compatibility
