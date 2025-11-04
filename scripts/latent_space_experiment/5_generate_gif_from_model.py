@@ -8,6 +8,10 @@ from typing import Any, Dict
 import imageio.v2 as imageio
 import numpy as np
 import torch
+try:
+    from torch.serialization import add_safe_globals
+except ImportError:  # pragma: no cover - compatibility
+    add_safe_globals = None
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 SRC_DIR = ROOT_DIR / "src"
@@ -81,7 +85,9 @@ def _dict_to_config(config_dict: Dict[str, Any]) -> PCAPPOConfig:
 
 
 def load_checkpoint(checkpoint_path: Path, device: torch.device) -> tuple[PCAPPOConfig, Dict[str, Any]]:
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    if add_safe_globals is not None:
+        add_safe_globals([Path])
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     if "agent" not in checkpoint or "config" not in checkpoint:
         raise ValueError("Checkpoint missing required keys 'agent' and 'config'.")
     config = _dict_to_config(checkpoint["config"])
