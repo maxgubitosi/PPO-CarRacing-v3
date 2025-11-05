@@ -29,6 +29,7 @@ class PCAObservationWrapper(gym.Wrapper):
         target_height: int,
         target_width: int,
         num_stack: int,
+        frame_skip: int = 0,
     ) -> None:
         super().__init__(env)
         self.pca_model_path = Path(pca_model_path)
@@ -36,6 +37,9 @@ class PCAObservationWrapper(gym.Wrapper):
         self.target_height = target_height
         self.target_width = target_width
         self.num_stack = num_stack
+        self.frame_skip = max(0, frame_skip)
+        self._stride = self.frame_skip + 1
+        self._history_length = self._stride * (self.num_stack - 1) + 1
 
         self._pca = _load_pca_model(self.pca_model_path)
         self.latent_dim = int(getattr(self._pca, "n_components", len(self._pca.components_)))
@@ -46,7 +50,8 @@ class PCAObservationWrapper(gym.Wrapper):
             shape=(self.latent_dim * self.num_stack,),
             dtype=np.float32,
         )
-        self._latent_stack: deque[np.ndarray] = deque(maxlen=self.num_stack)
+        self._latent_history: deque[np.ndarray] = deque(maxlen=self._history_length)
+        self._latent_stack = self._latent_history
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         obs, info = self.env.reset(seed=seed, options=options)
@@ -54,9 +59,9 @@ class PCAObservationWrapper(gym.Wrapper):
         info = dict(info)
         info["offroad"] = offroad
         info["offroad_ratio"] = ratio
-        self._latent_stack.clear()
-        for _ in range(self.num_stack):
-            self._latent_stack.append(projected.copy())
+        self._latent_history.clear()
+        for _ in range(self._history_length):
+            self._latent_history.append(projected.copy())
         return self._get_stacked_latent(), info
 
     def step(self, action):
@@ -65,13 +70,20 @@ class PCAObservationWrapper(gym.Wrapper):
         info = dict(info)
         info["offroad"] = offroad
         info["offroad_ratio"] = ratio
-        self._latent_stack.append(projected.copy())
+        self._latent_history.append(projected.copy())
         return self._get_stacked_latent(), reward, terminated, truncated, info
 
     def _get_stacked_latent(self) -> np.ndarray:
-        if not self._latent_stack:
+        if not self._latent_history:
             raise RuntimeError("Latent stack is empty")
-        stacked = np.concatenate(list(self._latent_stack), axis=0)
+        if len(self._latent_history) < self._history_length:
+            raise RuntimeError("Latent history buffer underflow")
+        selected = [
+            np.array(self._latent_history[-1 - i * self._stride], copy=False)
+            for i in range(self.num_stack)
+        ]
+        selected.reverse()
+        stacked = np.concatenate(selected, axis=0)
         return stacked.astype(np.float32, copy=False)
 
     def _process(self, frame: np.ndarray) -> tuple[np.ndarray, bool, float]:
@@ -135,6 +147,7 @@ def _make_env(
     target_height: int,
     target_width: int,
     num_stack: int,
+    frame_skip_between_frames: int = 0,
     offroad_penalty: float | None,
     max_offroad_seconds: float,
     continuous: bool = True,
@@ -154,6 +167,7 @@ def _make_env(
             target_height=target_height,
             target_width=target_width,
             num_stack=num_stack,
+            frame_skip=frame_skip_between_frames,
         )
         env = OffRoadPenaltyWrapper(
             env,
@@ -177,6 +191,7 @@ def create_pca_vector_env(
     target_height: int,
     target_width: int,
     num_stack: int,
+    frame_skip_between_frames: int = 0,
     offroad_penalty: float | None,
     max_offroad_seconds: float,
     continuous: bool = True,
@@ -191,6 +206,7 @@ def create_pca_vector_env(
             target_height=target_height,
             target_width=target_width,
             num_stack=num_stack,
+            frame_skip_between_frames=frame_skip_between_frames,
             offroad_penalty=offroad_penalty,
             max_offroad_seconds=max_offroad_seconds,
             continuous=continuous,
@@ -212,6 +228,7 @@ def create_pca_single_env(
     target_height: int,
     target_width: int,
     num_stack: int,
+    frame_skip_between_frames: int = 0,
     offroad_penalty: float | None,
     max_offroad_seconds: float,
     continuous: bool,
@@ -225,6 +242,7 @@ def create_pca_single_env(
         target_height=target_height,
         target_width=target_width,
         num_stack=num_stack,
+        frame_skip_between_frames=frame_skip_between_frames,
         offroad_penalty=offroad_penalty,
         max_offroad_seconds=max_offroad_seconds,
         continuous=continuous,

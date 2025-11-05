@@ -121,6 +121,7 @@ def main() -> None:
         target_height=config.resize_height,
         target_width=config.resize_width,
         num_stack=config.num_stack,
+        frame_skip_between_frames=config.frame_skip,
         offroad_penalty=config.offroad_penalty,
         max_offroad_seconds=config.max_offroad_seconds,
         continuous=config.continuous,

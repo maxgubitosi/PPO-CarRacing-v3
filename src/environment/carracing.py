@@ -86,12 +86,15 @@ class CarRacingPreprocess(gym.Wrapper):
 
 
 class FrameStackWrapper(gym.Wrapper):
-    def __init__(self, env: gym.Env, num_stack: int) -> None:
+    def __init__(self, env: gym.Env, num_stack: int, frame_skip: int = 0) -> None:
         super().__init__(env)
         if num_stack < 1:
             raise ValueError("num_stack must be at least 1")
         self.num_stack = num_stack
-        self.frames: deque[np.ndarray] = deque(maxlen=num_stack)
+        self.frame_skip = max(0, frame_skip)
+        self._stride = self.frame_skip + 1
+        self._history_length = self._stride * (num_stack - 1) + 1
+        self.frames: deque[np.ndarray] = deque(maxlen=self._history_length)
 
         obs_space = self.env.observation_space
         if not isinstance(obs_space, Box):
@@ -104,7 +107,7 @@ class FrameStackWrapper(gym.Wrapper):
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         obs, info = self.env.reset(seed=seed, options=options)
         self.frames.clear()
-        for _ in range(self.num_stack):
+        for _ in range(self._history_length):
             self.frames.append(np.array(obs, copy=True))
         return self._get_observation(), info
 
@@ -114,8 +117,13 @@ class FrameStackWrapper(gym.Wrapper):
         return self._get_observation(), reward, terminated, truncated, info
 
     def _get_observation(self) -> np.ndarray:
-        assert self.frames, "FrameStackWrapper frames buffer is empty"
-        return np.concatenate(list(self.frames), axis=0)
+        assert len(self.frames) >= self._history_length, "FrameStackWrapper history buffer underflow"
+        selected = [
+            np.array(self.frames[-1 - i * self._stride], copy=False)
+            for i in range(self.num_stack)
+        ]
+        selected.reverse()
+        return np.concatenate(selected, axis=0)
 
 
 class OffRoadPenaltyWrapper(gym.Wrapper):
@@ -174,6 +182,8 @@ def _make_env(
     offroad_penalty: float | None,
     max_offroad_seconds: float = 2.0,
     continuous: bool = True,
+    frame_skip_between_frames: int = 0,
+    num_stack: int = 4,
 ) -> Callable[[], gym.Env]:
     """
     Crea un environment CarRacing-v3.
@@ -193,7 +203,11 @@ def _make_env(
         )
         
         env = CarRacingPreprocess(env)
-        env = FrameStackWrapper(env, num_stack=4)
+        env = FrameStackWrapper(
+            env,
+            num_stack=num_stack,
+            frame_skip=frame_skip_between_frames,
+        )
         env = OffRoadPenaltyWrapper(
             env,
             max_offroad_seconds=max_offroad_seconds,
@@ -215,6 +229,8 @@ def create_vector_env(
     offroad_penalty: float | None = None,
     max_offroad_seconds: float = 2.0,
     continuous: bool = True,
+    frame_skip_between_frames: int = 0,
+    num_stack: int = 4,
 ) -> gym.Env:
     env_fns = [
         _make_env(
@@ -224,6 +240,8 @@ def create_vector_env(
             offroad_penalty=offroad_penalty,
             max_offroad_seconds=max_offroad_seconds,
             continuous=continuous,
+            frame_skip_between_frames=frame_skip_between_frames,
+            num_stack=num_stack,
         )
         for idx in range(num_envs)
     ]
@@ -240,6 +258,8 @@ def create_single_env(
     offroad_penalty: float | None = None,
     max_offroad_seconds: float = 2.0,
     continuous: bool = True,
+    frame_skip_between_frames: int = 0,
+    num_stack: int = 4,
 ) -> gym.Env:
     return _make_env(
         env_id,
@@ -248,6 +268,8 @@ def create_single_env(
         offroad_penalty=offroad_penalty,
         max_offroad_seconds=max_offroad_seconds,
         continuous=continuous,
+        frame_skip_between_frames=frame_skip_between_frames,
+        num_stack=num_stack,
     )()
 
 
@@ -258,4 +280,3 @@ __all__ = [
     "FrameStackWrapper",
     "OffRoadTruncationWrapper",
 ]
-

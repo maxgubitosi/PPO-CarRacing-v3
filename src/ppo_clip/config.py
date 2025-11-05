@@ -10,6 +10,8 @@ class PPOConfig:
     total_timesteps: int = 1_000_000
     num_envs: int = 4
     num_steps: int = 512
+    num_stack: int = 4
+    frame_skip: int = 0
     num_minibatches: int = 8
     update_epochs: int = 8
     gamma: float = 0.99
@@ -38,6 +40,12 @@ class PPOConfig:
     continuous: bool = True  # True para acciones continuas, False para discretas (5 acciones)
 
     def __post_init__(self) -> None:
+        if self.num_stack <= 0:
+            raise ValueError("num_stack must be positive")
+
+        if self.frame_skip < 0:
+            raise ValueError("frame_skip must be non-negative")
+
         if self.video_interval_minutes is not None and self.video_interval_minutes <= 0:
             raise ValueError("video_interval_minutes must be positive or None")
 

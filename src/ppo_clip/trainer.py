@@ -40,6 +40,8 @@ class PPOTrainer:
             offroad_penalty=config.offroad_penalty,
             max_offroad_seconds=config.max_offroad_seconds,
             continuous=config.continuous,
+            frame_skip_between_frames=config.frame_skip,
+            num_stack=config.num_stack,
         )
         self.eval_env_seeds = [config.seed + 10 + i for i in range(config.eval_episodes)]
         self.eval_env_index = 0
@@ -51,6 +53,8 @@ class PPOTrainer:
                 offroad_penalty=config.offroad_penalty,
                 max_offroad_seconds=config.max_offroad_seconds,
                 continuous=config.continuous,
+                frame_skip_between_frames=config.frame_skip,
+                num_stack=config.num_stack,
             )
             if config.track_eval
             else None
@@ -253,6 +257,8 @@ class PPOTrainer:
             offroad_penalty=self.config.offroad_penalty,
             max_offroad_seconds=self.config.max_offroad_seconds,
             continuous=self.config.continuous,
+            frame_skip_between_frames=self.config.frame_skip,
+            num_stack=self.config.num_stack,
         )
 
         frames = []

@@ -20,6 +20,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--total-timesteps", type=int, default=1_000_000)
     parser.add_argument("--num-envs", type=int, default=4)
     parser.add_argument("--num-steps", type=int, default=512)
+    parser.add_argument("--num-stack", type=int, default=4, help="Number of frames stacked per observation")
+    parser.add_argument(
+        "--frame-skip",
+        type=int,
+        default=0,
+        help="Number of environment frames to skip between stacked observations",
+    )
     parser.add_argument("--num-minibatches", type=int, default=8)
     parser.add_argument("--update-epochs", type=int, default=8)
     parser.add_argument("--learning-rate", type=float, default=5e-5)
@@ -63,6 +70,8 @@ def main() -> None:
         total_timesteps=args.total_timesteps,
         num_envs=args.num_envs,
         num_steps=args.num_steps,
+        num_stack=args.num_stack,
+        frame_skip=args.frame_skip,
         num_minibatches=args.num_minibatches,
         update_epochs=args.update_epochs,
         gamma=args.gamma,

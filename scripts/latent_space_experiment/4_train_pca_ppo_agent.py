@@ -42,6 +42,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--resume", type=str, default=None, help="Checkpoint (.pt) path to resume from")
     parser.add_argument("--pca-model-path", type=Path, default=Path("scripts/latent_space_experiment/models/pca/dim_012/pca_model.pkl"))
     parser.add_argument("--num-stack", type=int, default=4)
+    parser.add_argument(
+        "--frame-skip",
+        type=int,
+        default=0,
+        help="Number of environment frames to skip between stacked PCA observations",
+    )
     parser.add_argument("--crop-ratio", type=float, default=0.13)
     parser.add_argument("--resize-height", type=int, default=48)
     parser.add_argument("--resize-width", type=int, default=48)
@@ -114,6 +120,7 @@ def main() -> None:
         offroad_penalty=args.offroad_penalty,
         pca_model_path=args.pca_model_path,
         num_stack=args.num_stack,
+        frame_skip=args.frame_skip,
         crop_ratio=args.crop_ratio,
         resize_height=args.resize_height,
         resize_width=args.resize_width,
