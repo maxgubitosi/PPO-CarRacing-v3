@@ -137,9 +137,16 @@ def _make_env(
     num_stack: int,
     offroad_penalty: float | None,
     max_offroad_seconds: float,
+    continuous: bool = True,
 ) -> Callable[[], gym.Env]:
     def thunk() -> gym.Env:
-        env = gym.make(env_id, render_mode=render_mode)
+        env = gym.make(
+            env_id,
+            render_mode=render_mode,
+            continuous=continuous,
+            lap_complete_percent=0.95,
+            domain_randomize=False,
+        )
         env = PCAObservationWrapper(
             env,
             pca_model_path=pca_model_path,
@@ -172,6 +179,7 @@ def create_pca_vector_env(
     num_stack: int,
     offroad_penalty: float | None,
     max_offroad_seconds: float,
+    continuous: bool = True,
 ) -> SyncVectorEnv | AsyncVectorEnv:
     env_fns = [
         _make_env(
@@ -185,6 +193,7 @@ def create_pca_vector_env(
             num_stack=num_stack,
             offroad_penalty=offroad_penalty,
             max_offroad_seconds=max_offroad_seconds,
+            continuous=continuous,
         )
         for i in range(num_envs)
     ]
@@ -205,6 +214,7 @@ def create_pca_single_env(
     num_stack: int,
     offroad_penalty: float | None,
     max_offroad_seconds: float,
+    continuous: bool,
 ) -> gym.Env:
     env_fn = _make_env(
         env_id,
@@ -217,5 +227,6 @@ def create_pca_single_env(
         num_stack=num_stack,
         offroad_penalty=offroad_penalty,
         max_offroad_seconds=max_offroad_seconds,
+        continuous=continuous,
     )
     return env_fn()

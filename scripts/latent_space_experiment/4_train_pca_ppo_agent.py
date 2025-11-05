@@ -64,6 +64,11 @@ def parse_args() -> argparse.Namespace:
         default=Path("scripts/latent_space_experiment/videos/ppo_latent"),
         help="Directory for saving PCA PPO policy videos.",
     )
+    parser.add_argument(
+        "--discrete",
+        action="store_true",
+        help="Use the discrete (5-action) CarRacing action space instead of the continuous steering/brake/gas.",
+    )
     parser.add_argument("--no-eval", action="store_true")
     return parser.parse_args()
 
@@ -116,6 +121,7 @@ def main() -> None:
         log_root=args.log_root,
         checkpoint_root=args.checkpoint_root,
         video_root=args.video_root,
+        continuous=not args.discrete,
     )
 
     trainer = PCAPPOTrainer(config)

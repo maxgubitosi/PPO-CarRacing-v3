@@ -12,6 +12,8 @@ import numpy as np
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
+from gymnasium.spaces import Discrete
+
 from utils import set_seed
 from ppo_clip.rollout_buffer import RolloutBuffer
 
@@ -39,6 +41,7 @@ class PCAPPOTrainer:
             num_stack=config.num_stack,
             offroad_penalty=config.offroad_penalty,
             max_offroad_seconds=config.max_offroad_seconds,
+            continuous=config.continuous,
         )
 
         self.eval_env_seeds = [config.seed + 10 + i for i in range(config.eval_episodes)]
@@ -55,6 +58,7 @@ class PCAPPOTrainer:
                 num_stack=config.num_stack,
                 offroad_penalty=config.offroad_penalty,
                 max_offroad_seconds=config.max_offroad_seconds,
+                continuous=config.continuous,
             )
             if config.track_eval
             else None
@@ -65,12 +69,19 @@ class PCAPPOTrainer:
 
         self.agent = PCAPPOAgent(obs_space, action_space, config)
 
+        self.is_discrete = isinstance(action_space, Discrete)
+        if self.is_discrete:
+            action_dim = action_space.n
+        else:
+            action_dim = int(np.prod(action_space.shape))
+
         self.buffer = RolloutBuffer(
             num_steps=config.num_steps,
             num_envs=config.num_envs,
             obs_shape=obs_space.shape,
-            action_dim=int(np.prod(action_space.shape)),
+            action_dim=action_dim,
             device=self.device,
+            is_discrete=self.is_discrete,
         )
 
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -105,16 +116,25 @@ class PCAPPOTrainer:
                 with torch.no_grad():
                     sample = self.agent.sample(obs)
 
-                actions = sample["action"].cpu().numpy()
+                if self.is_discrete:
+                    actions = sample["action"].cpu().numpy().astype(int)
+                else:
+                    actions = sample["action"].cpu().numpy().astype(np.float32)
                 next_obs, rewards, terminated, truncated, infos = self.env.step(actions)
                 dones = np.logical_or(terminated, truncated)
 
                 reward_tensor = torch.as_tensor(rewards, dtype=torch.float32, device=self.device)
                 done_tensor = torch.as_tensor(dones, dtype=torch.float32, device=self.device)
 
+                action_for_buffer = sample["raw_action"].detach()
+                if self.is_discrete:
+                    if action_for_buffer.dim() == 2:
+                        action_for_buffer = action_for_buffer.squeeze(-1)
+                    action_for_buffer = action_for_buffer.long()
+
                 self.buffer.add(
                     obs,
-                    sample["raw_action"].detach(),
+                    action_for_buffer,
                     sample["log_prob"].detach(),
                     reward_tensor,
                     done_tensor,
@@ -213,7 +233,11 @@ class PCAPPOTrainer:
                 obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
                 with torch.no_grad():
                     action, _ = self.agent.act_deterministic(obs_tensor)
-                obs, reward, terminated, truncated, _ = self.eval_env.step(action.squeeze(0).cpu().numpy())
+                if self.is_discrete:
+                    env_action = int(action.squeeze(0).item())
+                else:
+                    env_action = action.squeeze(0).cpu().numpy()
+                obs, reward, terminated, truncated, _ = self.eval_env.step(env_action)
                 done = terminated or truncated
                 total_reward += reward
                 steps += 1
@@ -251,6 +275,7 @@ class PCAPPOTrainer:
             num_stack=self.config.num_stack,
             offroad_penalty=self.config.offroad_penalty,
             max_offroad_seconds=self.config.max_offroad_seconds,
+            continuous=self.config.continuous,
         )
 
         frames = []
@@ -266,7 +291,11 @@ class PCAPPOTrainer:
             obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
             with torch.no_grad():
                 action, _ = self.agent.act_deterministic(obs_tensor)
-            obs, _, terminated, truncated, _ = env.step(action.squeeze(0).cpu().numpy())
+            if self.is_discrete:
+                env_action = int(action.squeeze(0).item())
+            else:
+                env_action = action.squeeze(0).cpu().numpy()
+            obs, _, terminated, truncated, _ = env.step(env_action)
             done = terminated or truncated
             frame = env.render()
             if frame is not None:

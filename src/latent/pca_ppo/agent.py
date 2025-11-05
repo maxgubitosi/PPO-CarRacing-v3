@@ -5,7 +5,7 @@ from typing import Any, Dict
 
 import torch
 import torch.nn.functional as F
-from gymnasium.spaces import Box
+from gymnasium.spaces import Discrete
 
 from ppo_clip.rollout_buffer import RolloutBatch
 
@@ -23,10 +23,11 @@ class UpdateStats:
 
 
 class PCAPPOAgent:
-    def __init__(self, observation_space: Box, action_space: Box, config: PCAPPOConfig) -> None:
+    def __init__(self, observation_space, action_space, config: PCAPPOConfig) -> None:
         self.config = config
         self.device = torch.device(config.device)
         self.network = LatentActorCritic(observation_space, action_space).to(self.device)
+        self.is_discrete = isinstance(action_space, Discrete)
         self.optimizer = torch.optim.Adam(
             self.network.parameters(),
             lr=config.learning_rate,
@@ -36,6 +37,9 @@ class PCAPPOAgent:
 
     def sample(self, obs: torch.Tensor) -> Dict[str, torch.Tensor]:
         scaled_action, log_prob, value, raw_action = self.network.act(obs)
+        if self.is_discrete:
+            scaled_action = scaled_action.long()
+            raw_action = raw_action.long()
         return {
             "action": scaled_action,
             "log_prob": log_prob,

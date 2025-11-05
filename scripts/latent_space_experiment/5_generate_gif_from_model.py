@@ -123,6 +123,7 @@ def main() -> None:
         num_stack=config.num_stack,
         offroad_penalty=config.offroad_penalty,
         max_offroad_seconds=config.max_offroad_seconds,
+        continuous=config.continuous,
     )
 
     obs_space = env.observation_space
