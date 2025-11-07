@@ -11,6 +11,7 @@ import imageio.v2 as imageio
 import numpy as np
 import torch
 from torch.utils.tensorboard import SummaryWriter
+from tqdm import tqdm
 
 try:
     from torch.serialization import add_safe_globals
@@ -106,6 +107,14 @@ class PPOTrainer:
         next_done = torch.zeros(self.config.num_envs, device=self.device)
 
         global_step = self._resume_step
+        
+        # Barra de progreso
+        pbar = tqdm(
+            total=self.config.total_timesteps,
+            initial=self._resume_step,
+            desc="Training",
+            unit="steps"
+        )
 
         for update in range(self._resume_update + 1, self.config.num_updates + 1):
             for step in range(self.config.num_steps):
@@ -132,6 +141,9 @@ class PPOTrainer:
                 obs = torch.as_tensor(next_obs, dtype=torch.float32, device=self.device)
                 next_done = done_tensor
                 global_step += self.config.num_envs
+                
+                # Actualizar barra de progreso
+                pbar.update(self.config.num_envs)
 
                 self._log_rollout_infos(infos, global_step)
 
@@ -178,6 +190,7 @@ class PPOTrainer:
                     self._record_video(global_step)
                     self._last_video_time = now
 
+        pbar.close()
         self.env.close()
         if self.eval_env:
             self.eval_env.close()
@@ -202,6 +215,46 @@ class PPOTrainer:
 
         self.writer.add_scalar("charts/learning_rate", self.agent.optimizer.param_groups[0]["lr"], global_step)
         self.writer.add_scalar("charts/update", update, global_step)
+        
+        # Loggear distribución de acciones del buffer
+        self._log_action_distribution(global_step)
+    
+    def _log_action_distribution(self, global_step: int) -> None:
+        """Log action distribution from the rollout buffer."""
+        actions = self.buffer.actions.cpu().numpy()  # Shape: (num_steps, num_envs, action_dim)
+        
+        # Aplanar para obtener todas las acciones del rollout
+        actions_flat = actions.reshape(-1, actions.shape[-1])
+        
+        if self.buffer.is_discrete:
+            # Para acciones discretas: contar frecuencia de cada acción
+            # actions_flat será de shape (num_steps * num_envs, 1)
+            action_counts = np.bincount(actions_flat.flatten().astype(int), minlength=5)
+            action_freq = action_counts / action_counts.sum()
+            
+            # Nombres de acciones discretas en CarRacing
+            action_names = ["Do Nothing", "Left", "Right", "Gas", "Brake"]
+            for i, (name, freq) in enumerate(zip(action_names, action_freq)):
+                self.writer.add_scalar(f"actions/discrete/{name}", freq, global_step)
+        else:
+            # Para acciones continuas: estadísticas de steering, gas, brake
+            # actions_flat será de shape (num_steps * num_envs, 3)
+            steering = actions_flat[:, 0]
+            gas = actions_flat[:, 1]
+            brake = actions_flat[:, 2]
+            
+            # Loggear medias y desviaciones estándar
+            self.writer.add_scalar("actions/continuous/steering_mean", float(np.mean(steering)), global_step)
+            self.writer.add_scalar("actions/continuous/steering_std", float(np.std(steering)), global_step)
+            self.writer.add_scalar("actions/continuous/gas_mean", float(np.mean(gas)), global_step)
+            self.writer.add_scalar("actions/continuous/gas_std", float(np.std(gas)), global_step)
+            self.writer.add_scalar("actions/continuous/brake_mean", float(np.mean(brake)), global_step)
+            self.writer.add_scalar("actions/continuous/brake_std", float(np.std(brake)), global_step)
+            
+            # También podemos loggear histogramas (esto es más pesado, pero muy útil)
+            self.writer.add_histogram("actions/continuous/steering_hist", steering, global_step)
+            self.writer.add_histogram("actions/continuous/gas_hist", gas, global_step)
+            self.writer.add_histogram("actions/continuous/brake_hist", brake, global_step)
 
     def _evaluate(self, global_step: int) -> None:
         if self.eval_env is None:
@@ -209,6 +262,7 @@ class PPOTrainer:
 
         returns = []
         lengths = []
+        deaths = []  # Episodios que terminaron por alejarse de la pista
 
         for idx in range(self.config.eval_episodes):
             seed = self.eval_env_seeds[self.eval_env_index]
@@ -218,6 +272,7 @@ class PPOTrainer:
             done = False
             total_reward = 0.0
             steps = 0
+            died = False
 
             while not done:
                 obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
@@ -227,13 +282,29 @@ class PPOTrainer:
                 done = terminated or truncated
                 total_reward += reward
                 steps += 1
+                
+                # Detectar muerte: reward de -100 indica que se alejó mucho de la pista
+                if reward <= -99.0:
+                    died = True
 
             returns.append(total_reward)
             lengths.append(steps)
+            deaths.append(1 if died else 0)
 
         self.writer.add_scalar("eval/return_mean", float(np.mean(returns)), global_step)
         self.writer.add_scalar("eval/return_std", float(np.std(returns)), global_step)
+        self.writer.add_scalar("eval/return_max", float(np.max(returns)), global_step)
+        self.writer.add_scalar("eval/return_min", float(np.min(returns)), global_step)
         self.writer.add_scalar("eval/episode_length", float(np.mean(lengths)), global_step)
+        self.writer.add_scalar("eval/death_rate", float(np.mean(deaths)), global_step)  # % de episodios que murieron
+        
+        print(
+            f"Eval @ {global_step}: "
+            f"return={np.mean(returns):.2f}±{np.std(returns):.2f} "
+            f"(max={np.max(returns):.2f}, min={np.min(returns):.2f}), "
+            f"length={np.mean(lengths):.0f}, "
+            f"death_rate={np.mean(deaths)*100:.0f}%"
+        )
 
     def _save_checkpoint(self, update: int, global_step: int) -> None:
         checkpoint_path = self.checkpoint_dir / f"ppo_clip_update_{update}.pt"
