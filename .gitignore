@@ -9,3 +9,9 @@ results/plots/
 
 !scripts/latent_space_experiment/models/pca/
 !scripts/latent_space_experiment/models/pca/**
+scripts/latent_space_experiment/models/beta_vae/
+scripts/latent_space_experiment/models/tsne/
+scripts/random/videos/
+tensorboard_logs/
+videos/
+models/
