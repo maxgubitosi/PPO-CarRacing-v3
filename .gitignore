@@ -1,9 +1,11 @@
 __pycache__/
 .venv/
-log/
-models/
-plots/
-tensorboard_logs/
-videos/
+
+results/log/
+results/models/ppo_clip/
+results/tensorboard_logs/ppo_clip/
+results/videos/ppo_clip/
+results/plots/
+
 !scripts/latent_space_experiment/models/pca/
 !scripts/latent_space_experiment/models/pca/**

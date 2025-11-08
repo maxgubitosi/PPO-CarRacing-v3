@@ -30,9 +30,9 @@ class PPOConfig:
     log_interval: int = 10
     eval_interval: int = 50
     save_interval: int = 50
-    log_root: Path = field(default_factory=lambda: Path("tensorboard_logs/ppo_clip"))
-    checkpoint_root: Path = field(default_factory=lambda: Path("models/ppo_clip"))
-    video_root: Path = field(default_factory=lambda: Path("videos/ppo_clip"))
+    log_root: Path = field(default_factory=lambda: Path("results/tensorboard_logs/ppo_clip"))
+    checkpoint_root: Path = field(default_factory=lambda: Path("results/models/ppo_clip"))
+    video_root: Path = field(default_factory=lambda: Path("results/videos/ppo_clip"))
     video_interval_minutes: float | None = 10.0
     max_video_steps: int = 1000
     max_offroad_seconds: float = 2.0
