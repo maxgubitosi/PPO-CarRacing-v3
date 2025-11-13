@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import argparse
 import sys
+import warnings
 from pathlib import Path
 
 import yaml
+
+warnings.filterwarnings("ignore", category=UserWarning, module="pygame.pkgdata")
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 SRC_DIR = ROOT_DIR / "src"

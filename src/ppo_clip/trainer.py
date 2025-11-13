@@ -26,6 +26,16 @@ from .config import PPOConfig
 from .rollout_buffer import RolloutBuffer
 
 
+class _NullSummaryWriter:
+    """No-op writer used when artifact logging is disabled."""
+
+    def __getattr__(self, name):  # pragma: no cover - simple utility
+        def noop(*args, **kwargs):
+            return None
+
+        return noop
+
+
 class PPOTrainer:
     def __init__(self, config: PPOConfig) -> None:
         self.config = config
@@ -82,24 +92,35 @@ class PPOTrainer:
 
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         self.run_name = f"ppo_clip_{timestamp}"
-        self.log_dir = (self.project_root / config.log_root / self.run_name).resolve()
-        self.checkpoint_dir = (self.project_root / config.checkpoint_root / self.run_name).resolve()
-        self.video_dir = (self.project_root / config.video_root / self.run_name).resolve()
-        self.log_dir.mkdir(parents=True, exist_ok=True)
-        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        if config.video_interval_minutes is not None:
-            self.video_dir.mkdir(parents=True, exist_ok=True)
+        self.write_artifacts = getattr(config, "write_artifacts", True)
+        if self.write_artifacts:
+            self.log_dir = (self.project_root / config.log_root / self.run_name).resolve()
+            self.checkpoint_dir = (self.project_root / config.checkpoint_root / self.run_name).resolve()
+            self.video_dir = (self.project_root / config.video_root / self.run_name).resolve()
+            self.log_dir.mkdir(parents=True, exist_ok=True)
+            self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+            if config.video_interval_minutes is not None:
+                self.video_dir.mkdir(parents=True, exist_ok=True)
 
-        self.writer = SummaryWriter(log_dir=str(self.log_dir))
-        self.writer.add_text("config", str(asdict(config)))
+            self.writer = SummaryWriter(log_dir=str(self.log_dir))
+            self.writer.add_text("config", str(asdict(config)))
+        else:
+            self.log_dir = None
+            self.checkpoint_dir = None
+            self.video_dir = None
+            self.writer = _NullSummaryWriter()
 
-        self.video_interval_seconds = (
-            config.video_interval_minutes * 60 if config.video_interval_minutes is not None else None
-        )
+        if self.write_artifacts and config.video_interval_minutes is not None:
+            self.video_interval_seconds = config.video_interval_minutes * 60
+        else:
+            self.video_interval_seconds = None
         self._last_video_time = time.perf_counter()
         self._video_seed_offset = 1000
         self._resume_step = 0
         self._resume_update = 0
+        self.collect_timing_metrics = config.collect_timing_metrics
+        self.profile_history: list[dict[str, float]] = []
+        self.completed_steps = 0
 
     def train(self) -> None:
         obs, _ = self.env.reset(seed=self.config.seed)
@@ -117,6 +138,15 @@ class PPOTrainer:
         )
 
         for update in range(self._resume_update + 1, self.config.num_updates + 1):
+            profile_entry: dict[str, float] | None = None
+            if self.collect_timing_metrics:
+                profile_entry = {
+                    "update": float(update),
+                    "rollout_timesteps": float(self.config.batch_size),
+                }
+                rollout_wall_start = time.perf_counter()
+                rollout_cpu_start = time.process_time()
+
             for step in range(self.config.num_steps):
                 with torch.no_grad():
                     sample = self.agent.sample(obs)
@@ -152,6 +182,16 @@ class PPOTrainer:
 
                 self._log_rollout_infos(infos, global_step)
 
+            if profile_entry is not None:
+                profile_entry["global_step"] = float(global_step)
+                profile_entry["rollout_wall_s"] = time.perf_counter() - rollout_wall_start
+                profile_entry["rollout_cpu_s"] = time.process_time() - rollout_cpu_start
+                update_wall_start = time.perf_counter()
+                update_cpu_start = time.process_time()
+            else:
+                update_wall_start = 0.0
+                update_cpu_start = 0.0
+
             with torch.no_grad():
                 _, last_values = self.agent.network.get_dist_and_value(obs)
 
@@ -183,10 +223,17 @@ class PPOTrainer:
 
             self._log_update_metrics(metrics, global_step, update)
 
+            if profile_entry is not None:
+                profile_entry["update_wall_s"] = time.perf_counter() - update_wall_start
+                profile_entry["update_cpu_s"] = time.process_time() - update_cpu_start
+                profile_entry["total_wall_s"] = profile_entry["rollout_wall_s"] + profile_entry["update_wall_s"]
+                profile_entry["total_cpu_s"] = profile_entry["rollout_cpu_s"] + profile_entry["update_cpu_s"]
+                self.profile_history.append(profile_entry)
+
             if self.config.track_eval and update % self.config.eval_interval == 0:
                 self._evaluate(global_step)
 
-            if update % self.config.save_interval == 0:
+            if self.write_artifacts and update % self.config.save_interval == 0:
                 self._save_checkpoint(update, global_step)
 
             if self.video_interval_seconds is not None:
@@ -200,6 +247,7 @@ class PPOTrainer:
         if self.eval_env:
             self.eval_env.close()
         self.writer.close()
+        self.completed_steps = global_step
 
     def _log_rollout_infos(self, infos: Dict[str, np.ndarray], global_step: int) -> None:
         if "episode" not in infos:
@@ -312,6 +360,8 @@ class PPOTrainer:
         )
 
     def _save_checkpoint(self, update: int, global_step: int) -> None:
+        if not (self.write_artifacts and self.checkpoint_dir):
+            return
         checkpoint_path = self.checkpoint_dir / f"ppo_clip_update_{update}.pt"
         torch.save(
             {
@@ -324,6 +374,8 @@ class PPOTrainer:
         )
 
     def _record_video(self, global_step: int) -> None:
+        if not (self.write_artifacts and self.video_dir):
+            return
         env_seed = self.eval_env_seeds[self.eval_env_index]
         self.eval_env_index = (self.eval_env_index + 1) % len(self.eval_env_seeds)
         env = create_single_env(
@@ -406,4 +458,3 @@ class PPOTrainer:
 
         # Ensure writer resumes with existing logs
         self.writer.add_text("resume", f"Resumed from {checkpoint_path}")
-

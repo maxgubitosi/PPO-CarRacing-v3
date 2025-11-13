@@ -39,6 +39,8 @@ class PPOConfig:
     offroad_penalty: float | None = None
     continuous: bool = True  # True para acciones continuas, False para discretas (5 acciones)
     reward_shaping: bool = False  # Si True, aplica reward shaping (clip rewards positivos a +1.0)
+    collect_timing_metrics: bool = False
+    write_artifacts: bool = True
 
     def __post_init__(self) -> None:
         if self.num_stack <= 0:
@@ -84,4 +86,3 @@ class PPOConfig:
         if updates == 0:
             raise ValueError("total_timesteps is too small for the provided rollout setup")
         return updates
-

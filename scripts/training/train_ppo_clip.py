@@ -3,7 +3,10 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+import warnings
 
+
+warnings.filterwarnings("ignore", category=UserWarning, module="pygame.pkgdata")
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 SRC_DIR = ROOT_DIR / "src"
@@ -106,4 +109,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
