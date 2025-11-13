@@ -1,14 +1,14 @@
 # PPO Configuration
 
 # Training
-total_timesteps: 50000
+total_timesteps: 5000000
 seed: 42
 
 # Environment
 num_envs: 8
 num_stack: 4
 frame_skip: 4
-max_offroad_seconds: 5.0
+max_offroad_seconds: 2.0
 offroad_penalty: null
 discrete: true 
 reward_shaping: true
@@ -32,7 +32,7 @@ torch_deterministic: false
 
 # Evaluation
 eval_episodes: 5
-eval_interval: 5
+eval_interval: 50
 no_eval: false
 
 # Checkpointing
