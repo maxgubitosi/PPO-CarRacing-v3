@@ -10,7 +10,7 @@ num_stack: 4
 frame_skip: 4
 max_offroad_seconds: 5.0
 offroad_penalty: null
-discrete: false 
+discrete: true 
 reward_shaping: true
 
 # PPO Hyperparameters
