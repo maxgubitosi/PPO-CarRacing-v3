@@ -50,6 +50,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-offroad-seconds", type=float, default=2.0)
     parser.add_argument("--offroad-penalty", type=float, default=None, nargs="?")
     parser.add_argument("--discrete", action="store_true", help="Use discrete action space (5 actions). Default is continuous (Box(3,))")
+    parser.add_argument("--reward-shaping", action="store_true", help="Apply reward shaping (clip positive rewards to +1.0) for training stability")
     parser.add_argument("--resume", type=str, default=None, help="Checkpoint (.pt) path to resume from")
     return parser.parse_args()
 
@@ -93,7 +94,8 @@ def main() -> None:
         max_video_steps=args.max_video_steps,
         max_offroad_seconds=args.max_offroad_seconds,
         offroad_penalty=args.offroad_penalty,
-        continuous=not args.discrete,  # Si --discrete está presente, continuous=False
+        continuous=not args.discrete, 
+        reward_shaping=args.reward_shaping,
     )
 
     trainer = PPOTrainer(config)

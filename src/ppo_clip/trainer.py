@@ -124,10 +124,10 @@ class PPOTrainer:
                 actions = sample["action"].cpu().numpy()
                 next_obs, rewards, terminated, truncated, infos = self.env.step(actions)
 
-                # Reward clipping para estabilizar el entrenamiento
-                # Limita recompensas positivas a +1.0 (las baldosas nuevas dan ~+10-20)
-                # Mantiene el costo por frame (-0.1) y penalización por salirse (-100)
-                rewards = np.clip(rewards, a_min=None, a_max=1.0)
+                # Reward shaping: si está habilitado, limita rewards positivos a +1.0 para estabilidad
+                # Mantiene costos por frame (-0.1) y penalización por salirse (-100) sin modificar
+                if self.config.reward_shaping:
+                    rewards = np.clip(rewards, a_min=None, a_max=1.0)
 
                 dones = np.logical_or(terminated, truncated)
 

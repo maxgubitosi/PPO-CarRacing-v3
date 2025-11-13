@@ -15,6 +15,9 @@ pip install -r requirements.txt
 
 ```
 PPO-CarRacing-v3/
+├── configs/                         
+│   ├── ppo_config_example.yaml      
+│   └── ppo_config.yaml             
 ├── results/                          
 │   ├── models/            
 │   ├── tensorboard_logs/
@@ -28,7 +31,8 @@ PPO-CarRacing-v3/
 │   ├── latent/
 │   ├── ppo_clip/
 │   └── utils/             
-└── requirements.txt
+│   └── requirements.txt
+└── train.sh
 ```
 
 ## Jugar en modo humano
@@ -40,7 +44,36 @@ python scripts/random/car_racing_human.py
 
 ## Entrenamiento
 
-**Configuración SOTA recomendada:**
+### Método Recomendado: Scripts Shell + Configuración YAML
+
+Los hiperparámetros se configuran en el archivo: configs/ppo_config.yaml
+
+**Entrenamiento
+
+```bash
+source .venv/bin/activate
+chmod +x train.sh
+./train.sh
+```
+
+
+**Modificar configuración:**
+
+Edita el archivo `configs/ppo_config.yaml` para cambiar hiperparámetros
+- `configs/ppo_config_example.yaml` - Configuración de ejemplo
+
+**Overrides desde línea de comandos:**
+
+```bash
+python scripts/training/train_with_config.py \
+    --config configs/ppo_discrete_sota.yaml \
+    --total-timesteps 2000000 \
+    --seed 123
+```
+
+### Método Alternativo: Argumentos CLI (Legacy)
+
+También puedes usar el script original con argumentos CLI:
 
 ```bash
 source .venv/bin/activate
@@ -103,8 +136,31 @@ El entrenamiento registra las siguientes métricas:
 
 ## Reanudar Entrenamiento
 
+**Con archivos YAML:**
+
+1. Edita el archivo de configuración y actualiza el campo `resume`:
+   ```yaml
+   resume: "results/models/ppo_clip/ppo_clip_20251113-102030/ppo_clip_update_100.pt"
+   ```
+
+2. Ejecuta el script:
+   ```bash
+   ./train_discrete_sota.sh
+   ```
+
+**Con argumentos CLI:**
+
+```bash
+python scripts/training/train_with_config.py \
+    --config configs/ppo_discrete_sota.yaml \
+    --resume results/models/ppo_clip/<run_name>/ppo_clip_update_<N>.pt
+```
+
+O con el método legacy:
+
 ```bash
 python scripts/training/train_ppo_clip.py \
     --resume results/models/ppo_clip/<run_name>/ppo_clip_update_<N>.pt \
-    --total-timesteps 2000000
+    --total-timesteps 2000000 \
+    --discrete
 ```

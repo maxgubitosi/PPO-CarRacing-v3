@@ -38,6 +38,7 @@ class PPOConfig:
     max_offroad_seconds: float = 2.0
     offroad_penalty: float | None = None
     continuous: bool = True  # True para acciones continuas, False para discretas (5 acciones)
+    reward_shaping: bool = False  # Si True, aplica reward shaping (clip rewards positivos a +1.0)
 
     def __post_init__(self) -> None:
         if self.num_stack <= 0:
