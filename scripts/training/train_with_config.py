@@ -114,6 +114,8 @@ def main() -> None:
         ent_coef=yaml_config["ent_coef"],
         value_coef=yaml_config["value_coef"],
         learning_rate=yaml_config["learning_rate"],
+        use_lr_scheduler=yaml_config.get("use_lr_scheduler", False),
+        lr_end=yaml_config.get("lr_end", 1e-6),
         max_grad_norm=yaml_config["max_grad_norm"],
         target_kl=yaml_config["target_kl"],
         seed=yaml_config["seed"],

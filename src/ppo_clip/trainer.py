@@ -76,6 +76,16 @@ class PPOTrainer:
 
         self.agent = PPOClipAgent(obs_space, action_space, config)
 
+        # Create learning rate scheduler if enabled
+        if config.use_lr_scheduler:
+            num_updates = config.total_timesteps // (config.num_steps * config.num_envs)
+            def lr_lambda(update):
+                progress = update / num_updates
+                return 1.0 - progress * (1.0 - config.lr_end / config.learning_rate)
+            self.lr_scheduler = torch.optim.lr_scheduler.LambdaLR(self.agent.optimizer, lr_lambda=lr_lambda)
+        else:
+            self.lr_scheduler = None
+
         # Detectar si el espacio de acción es discreto
         from gymnasium.spaces import Discrete
         is_discrete = isinstance(action_space, Discrete)
@@ -220,6 +230,10 @@ class PPOTrainer:
                     break
 
             self.buffer.reset()
+
+            # Update learning rate scheduler
+            if self.lr_scheduler is not None:
+                self.lr_scheduler.step()
 
             self._log_update_metrics(metrics, global_step, update)
 

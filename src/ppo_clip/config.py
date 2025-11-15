@@ -20,6 +20,8 @@ class PPOConfig:
     ent_coef: float = 0.01
     value_coef: float = 0.5
     learning_rate: float = 5e-5
+    use_lr_scheduler: bool = False
+    lr_end: float = 1e-6
     max_grad_norm: float = 0.5
     target_kl: float | None = None
     seed: int = 42

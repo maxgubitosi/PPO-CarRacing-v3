@@ -19,3 +19,4 @@ optuna>=3.3.0
 setuptools<81
 cloudpickle>=1.2.0
 farama-notifications>=0.0.1
+moviepy>=1.0.3

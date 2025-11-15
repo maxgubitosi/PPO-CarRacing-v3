@@ -33,6 +33,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-minibatches", type=int, default=8)
     parser.add_argument("--update-epochs", type=int, default=8)
     parser.add_argument("--learning-rate", type=float, default=5e-5)
+    parser.add_argument("--use-lr-scheduler", action="store_true", help="Enable linear learning rate decay")
+    parser.add_argument("--lr-end", type=float, default=1e-6, help="Final learning rate for scheduler")
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--gae-lambda", type=float, default=0.95)
     parser.add_argument("--clip-coef", type=float, default=0.2)
@@ -84,6 +86,8 @@ def main() -> None:
         ent_coef=args.ent_coef,
         value_coef=args.value_coef,
         learning_rate=args.learning_rate,
+        use_lr_scheduler=args.use_lr_scheduler,
+        lr_end=args.lr_end,
         max_grad_norm=args.max_grad_norm,
         target_kl=args.target_kl,
         seed=args.seed,
