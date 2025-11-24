@@ -5,10 +5,10 @@ total_timesteps: 5000000
 seed: 42
 
 # Environment
-num_envs: 8
+num_envs: 4
 num_stack: 4
 frame_skip: 4
-max_offroad_seconds: 5.0
+max_offroad_seconds: 2.0
 offroad_penalty: null
 discrete: true 
 reward_shaping: true
@@ -18,7 +18,7 @@ num_steps: 512
 num_minibatches: 4
 update_epochs: 10
 learning_rate: 0.0001
-use_lr_scheduler: false
+use_lr_scheduler: true
 lr_end: 0.000001
 gamma: 0.99
 gae_lambda: 0.95

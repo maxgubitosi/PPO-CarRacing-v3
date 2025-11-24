@@ -15,3 +15,6 @@ scripts/random/videos/
 tensorboard_logs/
 videos/
 models/
+
+!configs/ppo_config_example.yaml
+configs/
