@@ -3,6 +3,12 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import Mapping, Sequence
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 SRC_DIR = ROOT_DIR / "src"
@@ -10,13 +16,19 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from latent.data import collect_image_paths, shuffle_and_limit  # noqa: E402
-from latent.paths import IMAGE_COLLECTION_DIR, MODEL_DIR, ensure_dir  # noqa: E402
-from latent.reducers import train_incremental_pca_models, train_tsne  # noqa: E402
+from latent.paths import (
+    IMAGE_COLLECTION_DIR,
+    MODEL_DIR,
+    GREYSCALE_PRESETS_PATH,
+    ensure_dir,
+)  # noqa: E402
+from latent.reducers import train_incremental_pca_models  # noqa: E402
 from latent.vae import BetaVAEConfig, train_beta_vae  # noqa: E402
+from latent.greyscale import load_greyscale_preset  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train PCA, t-SNE, and beta-VAE models.")
+    parser = argparse.ArgumentParser(description="Train PCA and beta-VAE models for latent experiments.")
     parser.add_argument(
         "--dataset-dir",
         type=Path,
@@ -33,15 +45,15 @@ def parse_args() -> argparse.Namespace:
         "--latent-dims",
         type=int,
         nargs="+",
-        default=[3, 12, 32],
+        default=[3, 5, 8, 12, 24],
         help="Latent dimensionalities to train.",
     )
     parser.add_argument(
         "--models",
         type=str,
         nargs="+",
-        default=["pca", "tsne", "beta-vae"],
-        help="Subset of models to train (choices: pca, tsne, beta-vae).",
+        default=["pca", "beta-vae"],
+        help="Subset of models to train (choices: pca, beta-vae).",
     )
     parser.add_argument(
         "--seed",
@@ -62,18 +74,6 @@ def parse_args() -> argparse.Namespace:
         help="Maximum number of samples to use for PCA (default: all).",
     )
     parser.add_argument(
-        "--tsne-max-samples",
-        type=int,
-        default=10000,
-        help="Maximum number of samples to use for t-SNE training.",
-    )
-    parser.add_argument(
-        "--tsne-perplexity",
-        type=float,
-        default=None,
-        help="Override t-SNE perplexity (auto if not provided).",
-    )
-    parser.add_argument(
         "--vae-epochs",
         type=int,
         default=30,
@@ -88,8 +88,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--vae-beta",
         type=float,
-        default=4.0,
-        help="Beta coefficient for beta-VAE KL divergence.",
+        default=0.5,
+        help="Beta coefficient for beta-VAE KL divergence (lower keeps recon quality).",
     )
     parser.add_argument(
         "--vae-lr",
@@ -134,6 +134,18 @@ def parse_args() -> argparse.Namespace:
         help="Minimum loss improvement required to reset beta-VAE early stopping patience.",
     )
     parser.add_argument(
+        "--vae-early-stop-min-rel",
+        type=float,
+        default=0.1,
+        help="Relative improvement (fraction of best loss) required to reset patience.",
+    )
+    parser.add_argument(
+        "--vae-road-weight",
+        type=float,
+        default=0.0,
+        help="Extra weight for dark/road pixels when computing reconstruction loss.",
+    )
+    parser.add_argument(
         "--crop-ratio",
         type=float,
         default=0.13,
@@ -151,7 +163,52 @@ def parse_args() -> argparse.Namespace:
         default=48,
         help="Width to resize processed frames to (set <=0 to keep original).",
     )
+    parser.add_argument(
+        "--greyscale-presets-path",
+        type=Path,
+        default=GREYSCALE_PRESETS_PATH,
+        help="JSONL file containing greyscale presets.",
+    )
+    parser.add_argument(
+        "--greyscale-label",
+        type=str,
+        default="veryheavy-medium",
+        help="Preset label to apply. Provide an empty string to disable greyscale preprocessing.",
+    )
     return parser.parse_args()
+
+
+def plot_pca_total_variance(
+    latent_dims: Sequence[int],
+    stats: Mapping[int, dict],
+    output_path: Path,
+) -> bool:
+    dims: list[int] = []
+    totals: list[float] = []
+    for dim in latent_dims:
+        metadata = stats.get(dim)
+        if not metadata:
+            continue
+        total = metadata.get("total_explained_variance")
+        if total is None:
+            continue
+        dims.append(int(dim))
+        totals.append(float(total))
+
+    if not dims:
+        return False
+
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.plot(dims, totals, marker="o")
+    ax.set_xlabel("Latent dimension (z)")
+    ax.set_ylabel("Total explained variance")
+    ax.set_title("PCA variance captured vs components")
+    ax.set_ylim(0.0, 1.05)
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150)
+    plt.close(fig)
+    return True
 
 
 def main() -> None:
@@ -162,8 +219,6 @@ def main() -> None:
 
     model_aliases = {
         "pca": "pca",
-        "tsne": "tsne",
-        "t-sne": "tsne",
         "beta-vae": "beta-vae",
         "beta_vae": "beta-vae",
         "beta": "beta-vae",
@@ -172,7 +227,7 @@ def main() -> None:
     for name in args.models:
         canonical = model_aliases.get(name.lower())
         if canonical is None:
-            raise ValueError(f"Unknown model type '{name}'. Valid options: pca, tsne, beta-vae.")
+            raise ValueError(f"Unknown model type '{name}'. Valid options: pca, beta-vae.")
         if canonical not in selected_models:
             selected_models.append(canonical)
 
@@ -181,12 +236,24 @@ def main() -> None:
 
     ensure_dir(args.output_dir)
 
-    crop_ratio = args.crop_ratio if args.crop_ratio > 0 else None
-    target_size = (
-        (args.resize_height, args.resize_width)
-        if args.resize_height > 0 and args.resize_width > 0
-        else None
-    )
+    greyscale_preset = None
+    if args.greyscale_label:
+        preset_path = Path(args.greyscale_presets_path).expanduser().resolve()
+        greyscale_preset = load_greyscale_preset(preset_path, args.greyscale_label)
+        print(
+            f"Using greyscale preset '{args.greyscale_label}' → "
+            f"{greyscale_preset.output_height}x{greyscale_preset.output_width}, "
+            f"clip[{greyscale_preset.clip_min:.0f},{greyscale_preset.clip_max:.0f}]"
+        )
+        crop_ratio = None
+        target_size = None
+    else:
+        crop_ratio = args.crop_ratio if args.crop_ratio > 0 else None
+        target_size = (
+            (args.resize_height, args.resize_width)
+            if args.resize_height > 0 and args.resize_width > 0
+            else None
+        )
 
     if "pca" in selected_models:
         print("\n=== Training PCA models ===")
@@ -200,6 +267,7 @@ def main() -> None:
             seed=args.seed,
             crop_ratio=crop_ratio,
             target_size=target_size,
+            greyscale_preset=greyscale_preset,
         )
         for latent_dim in latent_dims:
             if latent_dim in pca_stats:
@@ -214,25 +282,9 @@ def main() -> None:
                     f"total={total_variance:.4f}"
                 )
 
-    if "tsne" in selected_models:
-        print("\n=== Training t-SNE models ===")
-        for latent_dim in latent_dims:
-            tsne_dir = ensure_dir(Path(args.output_dir) / "tsne" / f"dim_{latent_dim:03d}")
-            tsne_stats = train_tsne(
-                image_paths,
-                latent_dim=latent_dim,
-                output_dir=tsne_dir,
-                max_samples=args.tsne_max_samples,
-                seed=args.seed,
-                perplexity=args.tsne_perplexity,
-                crop_ratio=crop_ratio,
-                target_size=target_size,
-            )
-            print(
-                f"t-SNE (z={latent_dim}) trained on {tsne_stats['n_samples']} samples; "
-                f"method={tsne_stats['method']}; "
-                f"KL divergence: {tsne_stats['kl_divergence']:.4f}"
-            )
+        plot_path = pca_root / "pca_total_variance.png"
+        if plot_pca_total_variance(latent_dims, pca_stats, plot_path):
+            print(f"Saved PCA variance plot to {plot_path}")
 
     if "beta-vae" in selected_models:
         print("\n=== Training beta-VAE models ===")
@@ -255,6 +307,8 @@ def main() -> None:
                 max_steps_per_epoch=args.vae_max_steps_per_epoch,
                 early_stop_patience=args.vae_early_stop_patience,
                 early_stop_min_delta=args.vae_early_stop_min_delta,
+                early_stop_min_rel=args.vae_early_stop_min_rel,
+                road_weight=args.vae_road_weight,
             )
 
             vae_metrics = train_beta_vae(
@@ -264,6 +318,7 @@ def main() -> None:
                 device=args.device,
                 crop_ratio=crop_ratio,
                 target_size=target_size,
+                greyscale_preset=greyscale_preset,
             )
             print(
                 f"beta-VAE (z={latent_dim}) - "

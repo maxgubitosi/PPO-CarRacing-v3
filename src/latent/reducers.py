@@ -8,7 +8,6 @@ from typing import Mapping, Sequence, Tuple
 
 import numpy as np
 from sklearn.decomposition import IncrementalPCA
-from sklearn.manifold import TSNE
 from tqdm import tqdm
 
 from .data import (
@@ -16,9 +15,9 @@ from .data import (
     DEFAULT_TARGET_SIZE,
     iter_image_batches,
     shuffle_and_limit,
-    load_image_batch,
 )
 from .paths import ensure_dir
+from .greyscale import GreyscalePreset
 
 
 def _truncate_incremental_pca(full_pca: IncrementalPCA, latent_dim: int) -> IncrementalPCA:
@@ -51,6 +50,7 @@ def train_incremental_pca_models(
     seed: int = 0,
     crop_ratio: float | None = DEFAULT_CROP_RATIO,
     target_size: Tuple[int, int] | None = DEFAULT_TARGET_SIZE,
+    greyscale_preset: GreyscalePreset | None = None,
 ) -> Mapping[int, dict]:
     """Fit IncrementalPCA once and export separate models for each latent dim."""
     ensure_dir(output_root)
@@ -69,6 +69,7 @@ def train_incremental_pca_models(
             normalize=True,
             crop_ratio=crop_ratio,
             target_size=target_size,
+            greyscale_preset=greyscale_preset,
         ),
         total=max(1, math.ceil(len(ordered_paths) / batch_size)),
         desc=f"IncrementalPCA (up to z={max_dim})",
@@ -95,62 +96,17 @@ def train_incremental_pca_models(
             "explained_variance_ratio": variance_ratio,
             "total_explained_variance": total_variance,
             "singular_values": truncated.singular_values_.tolist(),
-            "crop_ratio": crop_ratio,
-            "target_size": target_size,
+            "crop_ratio": greyscale_preset.crop_ratio if greyscale_preset else crop_ratio,
+            "target_size": (
+                (greyscale_preset.output_height, greyscale_preset.output_width)
+                if greyscale_preset
+                else target_size
+            ),
+            "channel_count": 1 if greyscale_preset else 3,
         }
+        if greyscale_preset is not None:
+            metadata["greyscale_preset"] = greyscale_preset.to_dict()
         (dim_dir / "metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
         results[dim] = metadata
 
     return results
-
-
-def train_tsne(
-    image_paths: Sequence[Path],
-    latent_dim: int,
-    output_dir: Path,
-    max_samples: int = 15000,
-    seed: int = 0,
-    perplexity: float | None = None,
-    crop_ratio: float | None = DEFAULT_CROP_RATIO,
-    target_size: Tuple[int, int] | None = DEFAULT_TARGET_SIZE,
-) -> dict:
-    """Fit a t-SNE embedding on a subsample of the dataset and persist results."""
-    ensure_dir(output_dir)
-
-    subset_paths = shuffle_and_limit(image_paths, max_samples, seed)
-    data = load_image_batch(
-        subset_paths,
-        normalize=True,
-        crop_ratio=crop_ratio,
-        target_size=target_size,
-    )
-    flat = data.reshape(data.shape[0], -1)
-
-    effective_perplexity = perplexity or min(30.0, max(5.0, (len(subset_paths) - 1) / 3.0))
-    method = "barnes_hut" if latent_dim <= 3 else "exact"
-    tsne = TSNE(
-        n_components=latent_dim,
-        perplexity=effective_perplexity,
-        learning_rate="auto",
-        init="pca",
-        random_state=seed,
-        method=method,
-    )
-    embedding = tsne.fit_transform(flat)
-
-    np.save(output_dir / "embedding.npy", embedding)
-    with (output_dir / "tsne_model.pkl").open("wb") as f:
-        pickle.dump(tsne, f)
-
-    metadata = {
-        "latent_dim": latent_dim,
-        "n_samples": len(subset_paths),
-        "perplexity": effective_perplexity,
-        "kl_divergence": float(tsne.kl_divergence_),
-        "subset_paths": [str(path) for path in subset_paths],
-        "crop_ratio": crop_ratio,
-        "target_size": target_size,
-        "method": method,
-    }
-    (output_dir / "metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
-    return metadata

@@ -20,6 +20,9 @@ SRC_DIR = ROOT_DIR / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
+from dataclasses import dataclass
+from typing import Dict, Tuple
+
 from latent.data import (  # noqa: E402
     DEFAULT_CROP_RATIO,
     DEFAULT_TARGET_SIZE,
@@ -27,8 +30,15 @@ from latent.data import (  # noqa: E402
     collect_image_paths,
     shuffle_and_limit,
 )
-from latent.paths import IMAGE_COLLECTION_DIR, MODEL_DIR, PLOTS_AND_METRICS_DIR, ensure_dir  # noqa: E402
+from latent.paths import (  # noqa: E402
+    IMAGE_COLLECTION_DIR,
+    MODEL_DIR,
+    PLOTS_AND_METRICS_DIR,
+    GREYSCALE_PRESETS_PATH,
+    ensure_dir,
+)
 from latent.vae import BetaVAE  # noqa: E402
+from latent.greyscale import load_greyscale_preset, GreyscalePreset  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -57,7 +67,7 @@ def parse_args() -> argparse.Namespace:
         "--latent-dims",
         type=int,
         nargs="+",
-        default=[3, 12, 32],
+        default=[3, 5, 8, 12, 24],
         help="Latent dimensionalities to analyse.",
     )
     parser.add_argument(
@@ -88,8 +98,8 @@ def parse_args() -> argparse.Namespace:
         "--models",
         type=str,
         nargs="+",
-        default=["pca", "tsne", "beta-vae"],
-        help="Subset of models to analyse (choices: pca, tsne, beta-vae).",
+        default=["pca", "beta-vae"],
+        help="Subset of models to analyse (choices: pca, beta-vae).",
     )
     parser.add_argument(
         "--crop-ratio",
@@ -109,6 +119,18 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_TARGET_SIZE[1],
         help="Processed image width (set <=0 to keep original).",
     )
+    parser.add_argument(
+        "--greyscale-presets-path",
+        type=Path,
+        default=GREYSCALE_PRESETS_PATH,
+        help="JSONL file containing greyscale presets.",
+    )
+    parser.add_argument(
+        "--greyscale-label",
+        type=str,
+        default="veryheavy-medium",
+        help="Preset label to apply. Provide empty string to disable greyscale preprocessing.",
+    )
     return parser.parse_args()
 
 
@@ -123,6 +145,14 @@ def compute_psnr(original: np.ndarray, reconstruction: np.ndarray) -> float:
     return float(20 * math.log10(1.0 / math.sqrt(mse)))
 
 
+def _prepare_for_display(image: np.ndarray) -> tuple[np.ndarray, str | None]:
+    if image.ndim == 3 and image.shape[2] == 1:
+        return image[..., 0], "gray"
+    if image.ndim == 2:
+        return image, "gray"
+    return image, None
+
+
 def save_reconstruction_grid(
     originals: np.ndarray,
     reconstructions: np.ndarray,
@@ -135,11 +165,13 @@ def save_reconstruction_grid(
     fig.suptitle(title)
 
     for idx in range(num_samples):
-        axes[0, idx].imshow(np.clip(originals[idx], 0.0, 1.0))
+        orig, orig_cmap = _prepare_for_display(originals[idx])
+        recon, recon_cmap = _prepare_for_display(reconstructions[idx])
+        axes[0, idx].imshow(np.clip(orig, 0.0, 1.0), cmap=orig_cmap)
         axes[0, idx].axis("off")
         axes[0, idx].set_title(f"Orig {idx+1}")
 
-        axes[1, idx].imshow(np.clip(reconstructions[idx], 0.0, 1.0))
+        axes[1, idx].imshow(np.clip(recon, 0.0, 1.0), cmap=recon_cmap)
         axes[1, idx].axis("off")
         axes[1, idx].set_title(f"Recon {idx+1}")
 
@@ -211,38 +243,6 @@ def analyse_pca(
         title=f"PCA latent space (first two dims, z={latent_dim})",
     )
     metrics_path = output_root / f"pca_dim_{latent_dim:03d}_metrics.json"
-    metrics_path.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
-    return metrics
-
-
-def analyse_tsne(
-    latent_dim: int,
-    output_root: Path,
-    model_dir: Path,
-) -> Dict[str, float]:
-    metadata_path = model_dir / "tsne" / f"dim_{latent_dim:03d}" / "metadata.json"
-    embedding_path = model_dir / "tsne" / f"dim_{latent_dim:03d}" / "embedding.npy"
-    if not metadata_path.exists() or not embedding_path.exists():
-        print(f"[t-SNE] Missing outputs for z={latent_dim}, skipping.")
-        return {}
-
-    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    embedding = np.load(embedding_path)
-
-    ensure_dir(output_root)
-    save_latent_scatter(
-        embedding,
-        output_root / f"tsne_dim_{latent_dim:03d}_scatter.png",
-        title=f"t-SNE latent space (first two dims, z={latent_dim})",
-    )
-
-    metrics = {
-        "n_points": embedding.shape[0],
-        "dim": embedding.shape[1],
-        "variance": np.var(embedding, axis=0).tolist(),
-        "kl_divergence": metadata.get("kl_divergence"),
-    }
-    metrics_path = output_root / f"tsne_dim_{latent_dim:03d}_metrics.json"
     metrics_path.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
     return metrics
 
@@ -322,6 +322,51 @@ def analyse_beta_vae(
     return metrics
 
 
+@dataclass(frozen=True)
+class SampleSpec:
+    crop_ratio: float | None
+    target_size: Tuple[int, int] | None
+    greyscale_preset: GreyscalePreset | None
+
+
+def load_samples_for_spec(
+    sample_paths,
+    spec: SampleSpec,
+    cache: Dict[SampleSpec, np.ndarray],
+) -> np.ndarray:
+    if spec not in cache:
+        cache[spec] = load_image_batch(
+            sample_paths,
+            normalize=True,
+            crop_ratio=spec.crop_ratio,
+            target_size=spec.target_size,
+            greyscale_preset=spec.greyscale_preset,
+        )
+    return cache[spec]
+
+
+def load_pca_metadata(model_dir: Path, latent_dim: int) -> Dict:
+    metadata_path = model_dir / "pca" / f"dim_{latent_dim:03d}" / "metadata.json"
+    if metadata_path.exists():
+        return json.loads(metadata_path.read_text(encoding="utf-8"))
+    return {}
+
+
+def spec_from_metadata(metadata: Dict, default_spec: SampleSpec) -> SampleSpec:
+    if not metadata:
+        return default_spec
+    if "greyscale_preset" in metadata and metadata["greyscale_preset"]:
+        preset = GreyscalePreset.from_record(metadata["greyscale_preset"])
+        return SampleSpec(crop_ratio=None, target_size=None, greyscale_preset=preset)
+    target_size = metadata.get("target_size")
+    target_tuple = tuple(target_size) if target_size else None
+    return SampleSpec(
+        crop_ratio=metadata.get("crop_ratio"),
+        target_size=target_tuple,
+        greyscale_preset=None,
+    )
+
+
 def main() -> None:
     args = parse_args()
 
@@ -329,24 +374,34 @@ def main() -> None:
     image_paths = collect_image_paths(args.dataset_dir)
     sample_paths = shuffle_and_limit(image_paths, args.num_samples, args.seed)
 
-    crop_ratio = args.crop_ratio if args.crop_ratio > 0 else None
-    target_size = (
-        (args.resize_height, args.resize_width)
-        if args.resize_height > 0 and args.resize_width > 0
-        else None
-    )
+    greyscale_preset = None
+    if args.greyscale_label:
+        preset_path = Path(args.greyscale_presets_path).expanduser().resolve()
+        greyscale_preset = load_greyscale_preset(preset_path, args.greyscale_label)
+        crop_ratio = None
+        target_size = None
+        print(
+            f"Using greyscale preset '{args.greyscale_label}' for analysis "
+            f"({greyscale_preset.output_height}x{greyscale_preset.output_width})."
+        )
+    else:
+        crop_ratio = args.crop_ratio if args.crop_ratio > 0 else None
+        target_size = (
+            (args.resize_height, args.resize_width)
+            if args.resize_height > 0 and args.resize_width > 0
+            else None
+        )
 
-    sample_images = load_image_batch(
-        sample_paths,
-        normalize=True,
+    default_spec = SampleSpec(
         crop_ratio=crop_ratio,
         target_size=target_size,
+        greyscale_preset=greyscale_preset,
     )
+    sample_cache: Dict[SampleSpec, np.ndarray] = {}
+    sample_images = load_samples_for_spec(sample_paths, default_spec, sample_cache)
 
     model_aliases = {
         "pca": "pca",
-        "tsne": "tsne",
-        "t-sne": "tsne",
         "beta-vae": "beta-vae",
         "beta_vae": "beta-vae",
         "beta": "beta-vae",
@@ -355,31 +410,27 @@ def main() -> None:
     for name in args.models:
         canonical = model_aliases.get(name.lower())
         if canonical is None:
-            raise ValueError(f"Unknown model type '{name}'. Valid options: pca, tsne, beta-vae.")
+            raise ValueError(f"Unknown model type '{name}'. Valid options: pca, beta-vae.")
         if canonical not in selected_models:
             selected_models.append(canonical)
 
     analysis_summary: Dict[str, Dict[int, Dict[str, float]]] = {
         "pca": {},
-        "tsne": {},
         "beta_vae": {},
     }
 
     for latent_dim in args.latent_dims:
         print(f"\n=== Analysing latent dimension {latent_dim} ===")
         if "pca" in selected_models:
+            metadata = load_pca_metadata(args.model_dir, latent_dim)
+            spec = spec_from_metadata(metadata, default_spec)
+            pca_samples = load_samples_for_spec(sample_paths, spec, sample_cache)
             analysis_summary["pca"][latent_dim] = analyse_pca(
                 latent_dim,
-                sample_images,
+                pca_samples,
                 args.output_dir,
                 args.model_dir,
                 args.grid_count,
-            )
-        if "tsne" in selected_models:
-            analysis_summary["tsne"][latent_dim] = analyse_tsne(
-                latent_dim,
-                args.output_dir,
-                args.model_dir,
             )
         if "beta-vae" in selected_models:
             analysis_summary["beta_vae"][latent_dim] = analyse_beta_vae(

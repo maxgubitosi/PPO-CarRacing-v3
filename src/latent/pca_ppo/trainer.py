@@ -11,11 +11,13 @@ import imageio.v2 as imageio
 import numpy as np
 import torch
 from torch.utils.tensorboard import SummaryWriter
+from tqdm import tqdm
 
 from gymnasium.spaces import Discrete
 
 from utils import set_seed
 from ppo_clip.rollout_buffer import RolloutBuffer
+from latent.greyscale import load_greyscale_preset
 
 from .agent import PCAPPOAgent
 from .config import PCAPPOConfig
@@ -27,6 +29,12 @@ class PCAPPOTrainer:
         self.config = config
         self.device = torch.device(config.device)
         self.project_root = Path(__file__).resolve().parents[3]
+        self.greyscale_preset = None
+        if config.greyscale_label:
+            if config.greyscale_presets_path is None:
+                raise ValueError("greyscale_presets_path must be provided when greyscale_label is set.")
+            preset_path = (self.project_root / config.greyscale_presets_path).resolve()
+            self.greyscale_preset = load_greyscale_preset(preset_path, config.greyscale_label)
 
         set_seed(config.seed, deterministic=config.torch_deterministic)
 
@@ -43,6 +51,7 @@ class PCAPPOTrainer:
             offroad_penalty=config.offroad_penalty,
             max_offroad_seconds=config.max_offroad_seconds,
             continuous=config.continuous,
+            greyscale_preset=self.greyscale_preset,
         )
 
         self.eval_env_seeds = [config.seed + 10 + i for i in range(config.eval_episodes)]
@@ -61,6 +70,7 @@ class PCAPPOTrainer:
                 offroad_penalty=config.offroad_penalty,
                 max_offroad_seconds=config.max_offroad_seconds,
                 continuous=config.continuous,
+                greyscale_preset=self.greyscale_preset,
             )
             if config.track_eval
             else None
@@ -106,12 +116,32 @@ class PCAPPOTrainer:
         self._video_seed_offset = 1000
         self._resume_step = 0
         self._resume_update = 0
+        self.completed_steps = 0
+
+        if config.use_lr_scheduler:
+            num_updates = max(1, config.total_timesteps // (config.num_steps * config.num_envs))
+
+            def lr_lambda(update: int) -> float:
+                progress = update / num_updates
+                target_ratio = config.lr_end / config.learning_rate
+                return 1.0 - progress * (1.0 - target_ratio)
+
+            self.lr_scheduler = torch.optim.lr_scheduler.LambdaLR(self.agent.optimizer, lr_lambda=lr_lambda)
+        else:
+            self.lr_scheduler = None
 
     def train(self) -> None:
         obs, _ = self.env.reset(seed=self.config.seed)
         obs = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
         next_done = torch.zeros(self.config.num_envs, device=self.device)
         global_step = self._resume_step
+
+        pbar = tqdm(
+            total=self.config.total_timesteps,
+            initial=self._resume_step,
+            desc="Training",
+            unit="steps",
+        )
 
         for update in range(self._resume_update + 1, self.config.num_updates + 1):
             for step in range(self.config.num_steps):
@@ -123,6 +153,8 @@ class PCAPPOTrainer:
                 else:
                     actions = sample["action"].cpu().numpy().astype(np.float32)
                 next_obs, rewards, terminated, truncated, infos = self.env.step(actions)
+                if self.config.reward_shaping:
+                    rewards = np.clip(rewards, a_min=None, a_max=1.0)
                 dones = np.logical_or(terminated, truncated)
 
                 reward_tensor = torch.as_tensor(rewards, dtype=torch.float32, device=self.device)
@@ -147,6 +179,7 @@ class PCAPPOTrainer:
                 next_done = done_tensor
                 global_step += self.config.num_envs
 
+                pbar.update(self.config.num_envs)
                 self._log_rollout_infos(infos, global_step)
 
             with torch.no_grad():
@@ -179,6 +212,9 @@ class PCAPPOTrainer:
             self.buffer.reset()
             self._log_update_metrics(metrics, global_step, update)
 
+            if self.lr_scheduler is not None:
+                self.lr_scheduler.step()
+
             if self.config.track_eval and update % self.config.eval_interval == 0:
                 self._evaluate(global_step)
 
@@ -191,10 +227,12 @@ class PCAPPOTrainer:
                     self._record_video(global_step)
                     self._last_video_time = now
 
+        pbar.close()
         self.env.close()
         if self.eval_env:
             self.eval_env.close()
         self.writer.close()
+        self.completed_steps = global_step
 
     def _log_rollout_infos(self, infos: Dict[str, np.ndarray], global_step: int) -> None:
         if "episode" not in infos:
@@ -214,6 +252,35 @@ class PCAPPOTrainer:
 
         self.writer.add_scalar("charts/learning_rate", self.agent.optimizer.param_groups[0]["lr"], global_step)
         self.writer.add_scalar("charts/update", update, global_step)
+        self._log_action_distribution(global_step)
+
+    def _log_action_distribution(self, global_step: int) -> None:
+        actions = self.buffer.actions.detach().cpu().numpy()
+        actions_flat = actions.reshape(-1, actions.shape[-1])
+
+        if self.is_discrete:
+            counts = np.bincount(actions_flat.astype(int).flatten())
+            total = np.sum(counts)
+            if total <= 0:
+                return
+            freqs = counts / total
+            for idx, freq in enumerate(freqs):
+                self.writer.add_scalar(f"actions/discrete/{idx}", float(freq), global_step)
+        else:
+            steering = actions_flat[:, 0]
+            gas = actions_flat[:, 1]
+            brake = actions_flat[:, 2]
+
+            self.writer.add_scalar("actions/continuous/steering_mean", float(np.mean(steering)), global_step)
+            self.writer.add_scalar("actions/continuous/steering_std", float(np.std(steering)), global_step)
+            self.writer.add_scalar("actions/continuous/gas_mean", float(np.mean(gas)), global_step)
+            self.writer.add_scalar("actions/continuous/gas_std", float(np.std(gas)), global_step)
+            self.writer.add_scalar("actions/continuous/brake_mean", float(np.mean(brake)), global_step)
+            self.writer.add_scalar("actions/continuous/brake_std", float(np.std(brake)), global_step)
+
+            self.writer.add_histogram("actions/continuous/steering_hist", steering, global_step)
+            self.writer.add_histogram("actions/continuous/gas_hist", gas, global_step)
+            self.writer.add_histogram("actions/continuous/brake_hist", brake, global_step)
 
     def _evaluate(self, global_step: int) -> None:
         if self.eval_env is None:
@@ -279,6 +346,7 @@ class PCAPPOTrainer:
             offroad_penalty=self.config.offroad_penalty,
             max_offroad_seconds=self.config.max_offroad_seconds,
             continuous=self.config.continuous,
+            greyscale_preset=self.greyscale_preset,
         )
 
         frames = []

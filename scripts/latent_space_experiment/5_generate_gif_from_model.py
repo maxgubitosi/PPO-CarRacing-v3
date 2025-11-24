@@ -22,6 +22,7 @@ if str(SRC_DIR) not in sys.path:
 from latent.pca_ppo import PCAPPOConfig  # noqa: E402
 from latent.pca_ppo.agent import PCAPPOAgent  # noqa: E402
 from latent.pca_ppo.env import PCAObservationWrapper, create_pca_single_env  # noqa: E402
+from latent.greyscale import load_greyscale_preset  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -83,6 +84,7 @@ def _dict_to_config(config_dict: Dict[str, Any]) -> PCAPPOConfig:
         "checkpoint_root",
         "video_root",
         "pca_model_path",
+        "greyscale_presets_path",
     }
     for field in path_fields:
         if field in converted and converted[field] is not None:
@@ -111,6 +113,10 @@ def main() -> None:
 
     config, agent_state = load_checkpoint(checkpoint_path, device)
     config.device = device_str
+    greyscale_preset = None
+    if config.greyscale_label and config.greyscale_presets_path:
+        preset_path = (ROOT_DIR / config.greyscale_presets_path).resolve()
+        greyscale_preset = load_greyscale_preset(preset_path, config.greyscale_label)
 
     env = create_pca_single_env(
         config.env_id,
@@ -125,6 +131,7 @@ def main() -> None:
         offroad_penalty=config.offroad_penalty,
         max_offroad_seconds=config.max_offroad_seconds,
         continuous=config.continuous,
+        greyscale_preset=greyscale_preset,
     )
 
     obs_space = env.observation_space

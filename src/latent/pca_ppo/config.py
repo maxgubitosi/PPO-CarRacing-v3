@@ -19,6 +19,8 @@ class PCAPPOConfig(PPOConfig):
     log_root: Path = field(default_factory=lambda: Path("tensorboard_logs/pca_ppo"))
     checkpoint_root: Path = field(default_factory=lambda: Path("models/pca_ppo"))
     video_root: Path = field(default_factory=lambda: Path("videos/pca_ppo"))
+    greyscale_presets_path: Path | None = None
+    greyscale_label: str | None = None
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -30,3 +32,5 @@ class PCAPPOConfig(PPOConfig):
             raise ValueError("crop_ratio must be between 0 (inclusive) and 1 (exclusive)")
         if self.ridge_lambda < 0:
             raise ValueError("ridge_lambda must be non-negative")
+        if self.greyscale_label and not self.greyscale_presets_path:
+            raise ValueError("greyscale_presets_path is required when greyscale_label is provided")

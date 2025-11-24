@@ -8,6 +8,7 @@ EXPERIMENT_ROOT = ROOT_DIR / "scripts" / "latent_space_experiment"
 IMAGE_COLLECTION_DIR = EXPERIMENT_ROOT / "image_collection"
 MODEL_DIR = EXPERIMENT_ROOT / "models"
 PLOTS_AND_METRICS_DIR = EXPERIMENT_ROOT / "plots_and_metrics"
+GREYSCALE_PRESETS_PATH = ROOT_DIR / "scripts" / "convert_to_greyscale" / "greyscale_presets.jsonl"
 
 
 def ensure_dir(path: Path) -> Path:
