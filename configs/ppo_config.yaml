@@ -17,7 +17,7 @@ reward_shaping: true
 num_steps: 128
 num_minibatches: 4
 update_epochs: 10
-learning_rate: 0.0003
+learning_rate: 0.00015
 use_lr_scheduler: true
 lr_end: 0.000001
 gamma: 0.99

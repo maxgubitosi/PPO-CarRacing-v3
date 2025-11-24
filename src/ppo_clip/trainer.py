@@ -76,15 +76,16 @@ class PPOTrainer:
 
         self.agent = PPOClipAgent(obs_space, action_space, config)
 
-        # Create learning rate scheduler if enabled
-        if config.use_lr_scheduler:
-            num_updates = config.total_timesteps // (config.num_steps * config.num_envs)
-            def lr_lambda(update):
-                progress = update / num_updates
-                return 1.0 - progress * (1.0 - config.lr_end / config.learning_rate)
-            self.lr_scheduler = torch.optim.lr_scheduler.LambdaLR(self.agent.optimizer, lr_lambda=lr_lambda)
-        else:
-            self.lr_scheduler = None
+        # Store resume info - will be set by load_checkpoint if resuming
+        self._resume_step = 0
+        self._resume_update = 0
+        
+        # Calculate total updates for THIS training run
+        self.num_updates = config.total_timesteps // (config.num_steps * config.num_envs)
+        
+        # NOTE: Learning rate scheduler is created AFTER potential checkpoint load
+        # to ensure correct remaining_updates calculation
+        self.lr_scheduler = None
 
         # Detectar si el espacio de acción es discreto
         from gymnasium.spaces import Discrete
@@ -126,11 +127,59 @@ class PPOTrainer:
             self.video_interval_seconds = None
         self._last_video_time = time.perf_counter()
         self._video_seed_offset = 1000
-        self._resume_step = 0
-        self._resume_update = 0
         self.collect_timing_metrics = config.collect_timing_metrics
         self.profile_history: list[dict[str, float]] = []
         self.completed_steps = 0
+        
+        # Create LR scheduler (will be recreated in load_checkpoint if resuming)
+        self._create_lr_scheduler()
+
+    def _create_lr_scheduler(self) -> None:
+        """Create or recreate the learning rate scheduler based on current config and resume state."""
+        if not self.config.use_lr_scheduler:
+            self.lr_scheduler = None
+            return
+        
+        # Calculate remaining updates from current position to target
+        remaining_updates = self.num_updates - self._resume_update
+        
+        # CRITICAL: Reset all optimizer state related to schedulers
+        # LambdaLR stores base_lrs internally, so we need to ensure a clean slate
+        # Delete the old scheduler completely before creating a new one
+        if hasattr(self, 'lr_scheduler') and self.lr_scheduler is not None:
+            del self.lr_scheduler
+            self.lr_scheduler = None
+        
+        # Explicitly set the base_lrs in the optimizer to current learning_rate
+        # This ensures LambdaLR uses the correct base
+        for param_group in self.agent.optimizer.param_groups:
+            param_group['initial_lr'] = self.config.learning_rate
+            param_group['lr'] = self.config.learning_rate
+        
+        # DEBUG: Print what we're about to use
+        print(f"\n[DEBUG _create_lr_scheduler]")
+        print(f"  config.learning_rate: {self.config.learning_rate:.6f}")
+        print(f"  config.lr_end: {self.config.lr_end:.6f}")
+        print(f"  num_updates: {self.num_updates}")
+        print(f"  _resume_update: {self._resume_update}")
+        print(f"  remaining_updates: {remaining_updates}")
+        print(f"  Current optimizer LR BEFORE scheduler creation: {self.agent.optimizer.param_groups[0]['lr']:.6f}")
+        
+        def lr_lambda(update_relative):
+            # update_relative starts at 0 when scheduler is created/resumed
+            if remaining_updates <= 0:
+                return self.config.lr_end / self.config.learning_rate
+            progress = update_relative / remaining_updates
+            return 1.0 - progress * (1.0 - self.config.lr_end / self.config.learning_rate)
+        
+        self.lr_scheduler = torch.optim.lr_scheduler.LambdaLR(
+            self.agent.optimizer, 
+            lr_lambda=lr_lambda
+        )
+        
+        print(f"  Current optimizer LR AFTER scheduler creation: {self.agent.optimizer.param_groups[0]['lr']:.6f}")
+        print(f"  Lambda at step 0: {lr_lambda(0):.6f}")
+        print(f"  Expected LR (base * lambda): {self.config.learning_rate * lr_lambda(0):.6f}\n")
 
     def train(self) -> None:
         obs, _ = self.env.reset(seed=self.config.seed)
@@ -468,7 +517,36 @@ class PPOTrainer:
         if "config" in agent_state:
             agent_state = {k: v for k, v in agent_state.items() if k in {"model", "optimizer"}}
 
+        # Load the agent state (model + optimizer)
         self.agent.load_state_dict(agent_state)
+        
+        # CRITICAL: Override the optimizer's learning rate with the current config's learning_rate
+        # This allows changing the LR when resuming from a checkpoint
+        for param_group in self.agent.optimizer.param_groups:
+            param_group['lr'] = self.config.learning_rate
+        
+        print(f"\n[Checkpoint Loaded]")
+        print(f"  Resumed from update {self._resume_update}, step {self._resume_step:,}")
+        print(f"  Optimizer LR was set to: {self.config.learning_rate:.6f}")
+
+        # Recalculate num_updates based on new total_timesteps (may have changed)
+        self.num_updates = self.config.total_timesteps // (self.config.num_steps * self.config.num_envs)
+        remaining_updates = self.num_updates - self._resume_update
+        total_steps_remaining = remaining_updates * self.config.num_steps * self.config.num_envs
+        
+        # Recreate the LR scheduler with updated remaining_updates
+        self._create_lr_scheduler()
+        
+        current_lr = self.agent.optimizer.param_groups[0]["lr"]
+        
+        print(f"\n{'='*70}")
+        print(f"LR Scheduler Configuration:")
+        print(f"  Checkpoint: Update {self._resume_update}, Step {self._resume_step:,}")
+        print(f"  Target: Update {self.num_updates}, Step {self.config.total_timesteps:,}")
+        print(f"  Remaining: {remaining_updates} updates ({total_steps_remaining:,} steps)")
+        print(f"  LR Schedule: {current_lr:.6f} → {self.config.lr_end:.6f}")
+        print(f"  LR will decay linearly over the next {total_steps_remaining:,} steps")
+        print(f"{'='*70}\n")
 
         # Ensure writer resumes with existing logs
         self.writer.add_text("resume", f"Resumed from {checkpoint_path}")
