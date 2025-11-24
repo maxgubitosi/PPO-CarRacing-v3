@@ -12,6 +12,7 @@ from gymnasium.spaces import Box
 from gymnasium.vector import AsyncVectorEnv, SyncVectorEnv
 
 from environment.carracing import OffRoadPenaltyWrapper
+from latent.greyscale import GreyscalePreset
 
 
 def _load_pca_model(path: Path):
@@ -30,12 +31,21 @@ class PCAObservationWrapper(gym.Wrapper):
         target_width: int,
         num_stack: int,
         frame_skip: int = 0,
+        greyscale_preset: GreyscalePreset | None = None,
     ) -> None:
         super().__init__(env)
         self.pca_model_path = Path(pca_model_path)
-        self.crop_ratio = crop_ratio
-        self.target_height = target_height
-        self.target_width = target_width
+        self.greyscale_preset = greyscale_preset
+        if self.greyscale_preset is not None:
+            self.crop_ratio = float(self.greyscale_preset.crop_ratio)
+            self.target_height = int(self.greyscale_preset.output_height)
+            self.target_width = int(self.greyscale_preset.output_width)
+            self.channel_count = 1
+        else:
+            self.crop_ratio = crop_ratio
+            self.target_height = target_height
+            self.target_width = target_width
+            self.channel_count = 3
         self.num_stack = num_stack
         self.frame_skip = max(0, frame_skip)
         self._stride = self.frame_skip + 1
@@ -92,9 +102,18 @@ class PCAObservationWrapper(gym.Wrapper):
         return latent, offroad, ratio
 
     def _project_frame(self, frame: np.ndarray) -> np.ndarray:
+        if self.greyscale_preset is not None:
+            processed = self.greyscale_preset.apply(frame, normalize=True, keepdims=True)
+        else:
+            processed = self._process_rgb_frame(frame)
+        flat = processed.reshape(1, -1)
+        latent = self._pca.transform(flat).astype(np.float32)
+        return latent.squeeze(0)
+
+    def _process_rgb_frame(self, frame: np.ndarray) -> np.ndarray:
         height = frame.shape[0]
-        crop_pixels = int(round(height * self.crop_ratio))
-        if crop_pixels > 0:
+        crop_pixels = int(round(height * max(0.0, self.crop_ratio)))
+        if crop_pixels > 0 and crop_pixels < height:
             frame = frame[: height - crop_pixels, :, :]
 
         resized = cv2.resize(
@@ -103,9 +122,7 @@ class PCAObservationWrapper(gym.Wrapper):
             interpolation=cv2.INTER_AREA,
         )
         normalized = resized.astype(np.float32) / 255.0
-        flat = normalized.reshape(1, -1)
-        latent = self._pca.transform(flat).astype(np.float32)
-        return latent.squeeze(0)
+        return normalized
 
     def reconstruct_from_latent(self, latent: np.ndarray) -> np.ndarray:
         latent = np.asarray(latent, dtype=np.float32)
@@ -113,8 +130,10 @@ class PCAObservationWrapper(gym.Wrapper):
             latent = latent[-self.latent_dim :]
         latent = latent.reshape(1, -1)
         reconstruction = self._pca.inverse_transform(latent)
-        reconstruction = reconstruction.reshape(self.target_height, self.target_width, 3)
+        reconstruction = reconstruction.reshape(self.target_height, self.target_width, self.channel_count)
         reconstruction = np.clip(reconstruction, 0.0, 1.0)
+        if reconstruction.shape[2] == 1:
+            reconstruction = reconstruction[..., 0]
         return reconstruction
 
     def _detect_offroad(self, frame: np.ndarray) -> tuple[bool, float]:
@@ -151,6 +170,7 @@ def _make_env(
     offroad_penalty: float | None,
     max_offroad_seconds: float,
     continuous: bool = True,
+    greyscale_preset: GreyscalePreset | None = None,
 ) -> Callable[[], gym.Env]:
     def thunk() -> gym.Env:
         env = gym.make(
@@ -168,6 +188,7 @@ def _make_env(
             target_width=target_width,
             num_stack=num_stack,
             frame_skip=frame_skip_between_frames,
+            greyscale_preset=greyscale_preset,
         )
         env = OffRoadPenaltyWrapper(
             env,
@@ -195,6 +216,7 @@ def create_pca_vector_env(
     offroad_penalty: float | None,
     max_offroad_seconds: float,
     continuous: bool = True,
+    greyscale_preset: GreyscalePreset | None = None,
 ) -> SyncVectorEnv | AsyncVectorEnv:
     env_fns = [
         _make_env(
@@ -210,6 +232,7 @@ def create_pca_vector_env(
             offroad_penalty=offroad_penalty,
             max_offroad_seconds=max_offroad_seconds,
             continuous=continuous,
+            greyscale_preset=greyscale_preset,
         )
         for i in range(num_envs)
     ]
@@ -232,6 +255,7 @@ def create_pca_single_env(
     offroad_penalty: float | None,
     max_offroad_seconds: float,
     continuous: bool,
+    greyscale_preset: GreyscalePreset | None = None,
 ) -> gym.Env:
     env_fn = _make_env(
         env_id,
@@ -246,5 +270,6 @@ def create_pca_single_env(
         offroad_penalty=offroad_penalty,
         max_offroad_seconds=max_offroad_seconds,
         continuous=continuous,
+        greyscale_preset=greyscale_preset,
     )
     return env_fn()

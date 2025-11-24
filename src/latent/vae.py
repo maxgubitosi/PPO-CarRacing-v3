@@ -17,12 +17,13 @@ from .data import (
     ImageDataset,
 )
 from .paths import ensure_dir
+from .greyscale import GreyscalePreset
 
 
 @dataclass
 class BetaVAEConfig:
     latent_dim: int
-    beta: float = 4.0
+    beta: float = 0.5
     epochs: int = 30
     batch_size: int = 128
     learning_rate: float = 1e-3
@@ -31,6 +32,8 @@ class BetaVAEConfig:
     max_steps_per_epoch: Optional[int] = None
     early_stop_patience: int = 3
     early_stop_min_delta: float = 1e-4
+    early_stop_min_rel: float = 0.1
+    road_weight: float = 0.0
 
 
 class BetaVAE(nn.Module):
@@ -135,8 +138,12 @@ class BetaVAE(nn.Module):
         mu: torch.Tensor,
         logvar: torch.Tensor,
         beta: float,
+        weights: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        recon_loss = F.mse_loss(recon_x, x, reduction="mean")
+        if weights is not None:
+            recon_loss = torch.mean(weights * (recon_x - x) ** 2)
+        else:
+            recon_loss = F.mse_loss(recon_x, x, reduction="mean")
         kl_divergence = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
         loss = recon_loss + beta * kl_divergence
         return loss, recon_loss, kl_divergence
@@ -149,6 +156,7 @@ def train_beta_vae(
     device: Optional[str] = None,
     crop_ratio: float | None = DEFAULT_CROP_RATIO,
     target_size: Sequence[int] | None = DEFAULT_TARGET_SIZE,
+    greyscale_preset: GreyscalePreset | None = None,
 ) -> Dict[str, float]:
     """Train a beta-VAE on the provided images and save weights under output_dir."""
     ensure_dir(output_dir)
@@ -174,11 +182,20 @@ def train_beta_vae(
     if target_size is not None:
         target_size = (int(target_size[0]), int(target_size[1]))
 
+    effective_crop = crop_ratio
+    effective_target = (
+        (int(target_size[0]), int(target_size[1])) if target_size is not None else None
+    )
+    if greyscale_preset is not None:
+        effective_crop = None
+        effective_target = None
+
     dataset = ImageDataset(
         image_paths,
         normalize=True,
-        crop_ratio=crop_ratio,
-        target_size=target_size,
+        crop_ratio=effective_crop,
+        target_size=effective_target,
+        greyscale_preset=greyscale_preset,
     )
     sample_shape = tuple(dataset[0].shape)
     torch_device = torch.device(device)
@@ -219,8 +236,11 @@ def train_beta_vae(
             batch = batch.to(torch_device)
             optimizer.zero_grad(set_to_none=True)
             recon_batch, mu, logvar = model(batch)
+            weights = None
+            if config.road_weight > 0.0:
+                weights = 1.0 + config.road_weight * (1.0 - batch)
             loss, recon_loss, kl_loss = model.loss_function(
-                recon_batch, batch, mu, logvar, config.beta
+                recon_batch, batch, mu, logvar, config.beta, weights
             )
             loss.backward()
             optimizer.step()
@@ -244,7 +264,11 @@ def train_beta_vae(
         history["recon"].append(epoch_recon)
         history["kl"].append(epoch_kl)
 
-        improved = best_loss - epoch_loss > config.early_stop_min_delta
+        improvement = best_loss - epoch_loss
+        min_required = config.early_stop_min_delta
+        if best_loss != float("inf") and config.early_stop_min_rel > 0.0:
+            min_required = max(min_required, best_loss * config.early_stop_min_rel)
+        improved = improvement > min_required
         if improved or best_loss == float("inf"):
             best_loss = epoch_loss
             torch.save(
@@ -268,17 +292,23 @@ def train_beta_vae(
             )
             break
 
+    recorded_target = effective_target
+    if greyscale_preset is not None:
+        recorded_target = (greyscale_preset.output_height, greyscale_preset.output_width)
+
     metrics_payload = {
         "loss": history["loss"],
         "recon": history["recon"],
         "kl": history["kl"],
-        "crop_ratio": crop_ratio,
-        "target_size": list(target_size) if target_size is not None else None,
+        "crop_ratio": greyscale_preset.crop_ratio if greyscale_preset else crop_ratio,
+        "target_size": list(recorded_target) if recorded_target is not None else None,
         "epochs_trained": len(history["loss"]),
         "early_stop_patience": patience,
         "early_stop_min_delta": config.early_stop_min_delta,
         "early_stop_triggered": patience > 0 and epochs_without_improvement >= patience,
     }
+    if greyscale_preset is not None:
+        metrics_payload["greyscale_preset"] = greyscale_preset.to_dict()
 
     (output_dir / "metrics.json").write_text(json.dumps(metrics_payload, indent=2), encoding="utf-8")
     (output_dir / "config.json").write_text(json.dumps(asdict(config), indent=2), encoding="utf-8")

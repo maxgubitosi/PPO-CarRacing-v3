@@ -3,8 +3,11 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+import warnings
 
 import torch
+
+warnings.filterwarnings("ignore", category=UserWarning, module="pygame.pkgdata")
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 SRC_DIR = ROOT_DIR / "src"
@@ -12,11 +15,13 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from latent.pca_ppo import PCAPPOConfig, PCAPPOTrainer  # noqa: E402
+from latent.greyscale import load_greyscale_preset  # noqa: E402
+from latent.paths import GREYSCALE_PRESETS_PATH  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train PPO agent on PCA-transformed CarRacing observations.")
-    parser.add_argument("--total-timesteps", type=int, default=500_000)
+    parser.add_argument("--total-timesteps", type=int, default=1_000_000)
     parser.add_argument("--num-envs", type=int, default=4)
     parser.add_argument("--num-steps", type=int, default=256)
     parser.add_argument("--num-minibatches", type=int, default=4)
@@ -45,7 +50,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--frame-skip",
         type=int,
-        default=0,
+        default=1,
         help="Number of environment frames to skip between stacked PCA observations",
     )
     parser.add_argument("--crop-ratio", type=float, default=0.13)
@@ -76,6 +81,18 @@ def parse_args() -> argparse.Namespace:
         help="Use the discrete (5-action) CarRacing action space instead of the continuous steering/brake/gas.",
     )
     parser.add_argument("--no-eval", action="store_true")
+    parser.add_argument(
+        "--greyscale-presets-path",
+        type=Path,
+        default=GREYSCALE_PRESETS_PATH,
+        help="JSONL file with greyscale presets for preprocessing.",
+    )
+    parser.add_argument(
+        "--greyscale-label",
+        type=str,
+        default="veryheavy-medium",
+        help="Preset label to use for preprocessing (empty string to disable).",
+    )
     return parser.parse_args()
 
 
@@ -92,6 +109,17 @@ def resolve_device(choice: str) -> str:
 def main() -> None:
     args = parse_args()
     device = resolve_device(args.device)
+    greyscale_preset = None
+    if args.greyscale_label:
+        preset_path = Path(args.greyscale_presets_path).expanduser().resolve()
+        greyscale_preset = load_greyscale_preset(preset_path, args.greyscale_label)
+        args.crop_ratio = greyscale_preset.crop_ratio
+        args.resize_height = greyscale_preset.output_height
+        args.resize_width = greyscale_preset.output_width
+        print(
+            f"Using greyscale preset '{args.greyscale_label}' "
+            f"({args.resize_height}x{args.resize_width}) for PCA PPO training."
+        )
 
     config = PCAPPOConfig(
         total_timesteps=args.total_timesteps,
@@ -129,6 +157,8 @@ def main() -> None:
         checkpoint_root=args.checkpoint_root,
         video_root=args.video_root,
         continuous=not args.discrete,
+        greyscale_presets_path=args.greyscale_presets_path if greyscale_preset else None,
+        greyscale_label=args.greyscale_label if greyscale_preset else None,
     )
 
     trainer = PCAPPOTrainer(config)

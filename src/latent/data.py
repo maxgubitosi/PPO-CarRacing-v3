@@ -9,7 +9,7 @@ import numpy as np
 from PIL import Image
 import torch
 from torch.utils.data import Dataset
-from torchvision import transforms
+from .greyscale import GreyscalePreset
 
 DEFAULT_CROP_RATIO = 0.13
 DEFAULT_TARGET_SIZE = (48, 48)  # (height, width)
@@ -44,6 +44,24 @@ def process_image_array(
     return np.asarray(image)
 
 
+def _prepare_array(
+    array: np.ndarray,
+    *,
+    normalize: bool,
+    crop_ratio: float | None,
+    target_size: Tuple[int, int] | None,
+    greyscale_preset: GreyscalePreset | None,
+) -> np.ndarray:
+    if greyscale_preset is not None:
+        processed = greyscale_preset.apply(array, normalize=normalize)
+        return processed.astype(np.float32)
+
+    processed = process_image_array(array, crop_ratio=crop_ratio, target_size=target_size).astype(np.float32)
+    if normalize:
+        processed /= 255.0
+    return processed
+
+
 def collect_image_paths(root: Path) -> List[Path]:
     """Return all image files stored under the given root directory."""
     if not root.exists():
@@ -74,16 +92,19 @@ def load_image_batch(
     normalize: bool = True,
     crop_ratio: float | None = DEFAULT_CROP_RATIO,
     target_size: Tuple[int, int] | None = DEFAULT_TARGET_SIZE,
+    greyscale_preset: GreyscalePreset | None = None,
 ) -> np.ndarray:
     """Load a batch of images into a numpy array."""
     batch = []
     for path in paths:
         array = imageio.imread(path)
-        array = process_image_array(array, crop_ratio=crop_ratio, target_size=target_size)
-        if normalize:
-            array = array.astype(np.float32) / 255.0
-        else:
-            array = array.astype(np.float32)
+        array = _prepare_array(
+            array,
+            normalize=normalize,
+            crop_ratio=crop_ratio,
+            target_size=target_size,
+            greyscale_preset=greyscale_preset,
+        )
         batch.append(array)
     return np.stack(batch, axis=0)
 
@@ -94,6 +115,7 @@ def iter_image_batches(
     normalize: bool = True,
     crop_ratio: float | None = DEFAULT_CROP_RATIO,
     target_size: Tuple[int, int] | None = DEFAULT_TARGET_SIZE,
+    greyscale_preset: GreyscalePreset | None = None,
 ) -> Iterator[np.ndarray]:
     """Yield successive batches of images as numpy arrays."""
     for start in range(0, len(paths), batch_size):
@@ -103,6 +125,7 @@ def iter_image_batches(
             normalize=normalize,
             crop_ratio=crop_ratio,
             target_size=target_size,
+            greyscale_preset=greyscale_preset,
         )
 
 
@@ -115,6 +138,7 @@ class ImageDataset(Dataset):
         normalize: bool = True,
         crop_ratio: float | None = DEFAULT_CROP_RATIO,
         target_size: Tuple[int, int] | None = DEFAULT_TARGET_SIZE,
+        greyscale_preset: GreyscalePreset | None = None,
     ) -> None:
         self.image_paths = list(image_paths)
         if not self.image_paths:
@@ -123,7 +147,7 @@ class ImageDataset(Dataset):
         self.normalize = normalize
         self.crop_ratio = crop_ratio
         self.target_size = target_size
-        self.transform = transforms.Compose([transforms.ToTensor()])
+        self.greyscale_preset = greyscale_preset
 
     def __len__(self) -> int:
         return len(self.image_paths)
@@ -132,9 +156,19 @@ class ImageDataset(Dataset):
         path = self.image_paths[index]
         with Image.open(path) as img:
             image = img.convert("RGB")
-            image = _apply_crop(image, self.crop_ratio)
-            image = _apply_resize(image, self.target_size)
-            tensor = self.transform(image)
-        if not self.normalize:
-            tensor = tensor * 255.0
+            array = np.asarray(image)
+
+        processed = _prepare_array(
+            array,
+            normalize=self.normalize,
+            crop_ratio=self.crop_ratio,
+            target_size=self.target_size,
+            greyscale_preset=self.greyscale_preset,
+        )
+
+        tensor = torch.from_numpy(processed)
+        if tensor.ndim == 2:
+            tensor = tensor.unsqueeze(0)
+        else:
+            tensor = tensor.permute(2, 0, 1)
         return tensor
