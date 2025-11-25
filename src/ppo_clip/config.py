@@ -45,6 +45,7 @@ class PPOConfig:
     collect_timing_metrics: bool = False
     write_artifacts: bool = True
     verbose: bool = False
+    latent_hidden_dim: int | None = None
 
     def __post_init__(self) -> None:
         if self.num_stack <= 0:

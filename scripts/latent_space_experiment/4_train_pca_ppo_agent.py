@@ -58,6 +58,8 @@ def main() -> None:
         yaml_cfg["resize_width"] = greyscale_preset.output_width
         yaml_cfg["greyscale_presets_path"] = greyscale_path or GREYSCALE_PRESETS_PATH
 
+    resume_path = yaml_cfg.get("resume")
+
     config = PCAPPOConfig(
         total_timesteps=yaml_cfg["total_timesteps"],
         num_envs=yaml_cfg["num_envs"],
@@ -96,16 +98,17 @@ def main() -> None:
         continuous=not yaml_cfg.get("discrete", False),
         greyscale_presets_path=yaml_cfg.get("greyscale_presets_path"),
         greyscale_label=greyscale_label if greyscale_preset else None,
-        resume=yaml_cfg.get("resume"),
         use_lr_scheduler=yaml_cfg.get("use_lr_scheduler", False),
         lr_end=yaml_cfg.get("lr_end", 1e-6),
         reward_shaping=yaml_cfg.get("reward_shaping", False),
         verbose=yaml_cfg.get("verbose", False),
+        latent_hidden_dim=yaml_cfg.get("latent_hidden_dim"),
+        compare_reconstruction=yaml_cfg.get("compare_reconstruction", True),
     )
 
     trainer = PCAPPOTrainer(config)
-    if config.resume:
-        trainer.load_checkpoint(Path(config.resume))
+    if resume_path:
+        trainer.load_checkpoint(Path(resume_path))
     trainer.train()
 
 

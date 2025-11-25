@@ -7,7 +7,12 @@ from .networks_discrete import DiscreteActorCritic
 from .networks_latent import LatentActorCritic
 
 
-def create_actor_critic(observation_space: Space, action_space: Space):
+def create_actor_critic(
+    observation_space: Space,
+    action_space: Space,
+    *,
+    latent_hidden_dim: int | None = None,
+):
     """
     Crea una red Actor-Critic apropiada según el tipo de espacio de acción.
     
@@ -29,7 +34,7 @@ def create_actor_critic(observation_space: Space, action_space: Space):
         if isinstance(action_space, Discrete):
             return DiscreteActorCritic(observation_space, action_space)
     elif obs_dims == 1:
-        return LatentActorCritic(observation_space, action_space)
+        return LatentActorCritic(observation_space, action_space, hidden_dim=latent_hidden_dim)
 
     raise ValueError(
         f"Espacio de observación no soportado: shape={observation_space.shape}, "

@@ -21,6 +21,8 @@ class PCAPPOConfig(PPOConfig):
     video_root: Path = field(default_factory=lambda: Path("videos/pca_ppo"))
     greyscale_presets_path: Path | None = None
     greyscale_label: str | None = None
+    latent_hidden_dim: int | None = None
+    compare_reconstruction: bool = True
 
     def __post_init__(self) -> None:
         super().__post_init__()

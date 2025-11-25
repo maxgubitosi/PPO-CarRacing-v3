@@ -25,7 +25,11 @@ class PPOClipAgent:
     def __init__(self, observation_space: Space, action_space: Space, config: PPOConfig) -> None:
         self.config = config
         self.device = torch.device(config.device)
-        self.network = create_actor_critic(observation_space, action_space).to(self.device)
+        self.network = create_actor_critic(
+            observation_space,
+            action_space,
+            latent_hidden_dim=config.latent_hidden_dim,
+        ).to(self.device)
         self.optimizer = torch.optim.Adam(
             self.network.parameters(),
             lr=config.learning_rate,
@@ -36,24 +40,18 @@ class PPOClipAgent:
 
     def sample(self, obs: torch.Tensor) -> Dict[str, torch.Tensor]:
         """Muestrea una acción de la política."""
-        if self.is_discrete:
-            # Para acciones discretas
-            action, log_prob, value = self.network.act(obs)
-            return {
-                "action": action,
-                "log_prob": log_prob,
-                "value": value,
-                "raw_action": action,  # Para discrete, raw es igual a action
-            }
+        result = self.network.act(obs)
+        if len(result) == 4:
+            action, log_prob, value, raw_action = result
         else:
-            # Para acciones continuas
-            scaled_action, log_prob, value, raw_action = self.network.act(obs)
-            return {
-                "action": scaled_action,
-                "log_prob": log_prob,
-                "value": value,
-                "raw_action": raw_action,
-            }
+            action, log_prob, value = result
+            raw_action = action
+        return {
+            "action": action,
+            "log_prob": log_prob,
+            "value": value,
+            "raw_action": raw_action,
+        }
 
     def evaluate(self, obs: torch.Tensor, actions: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         return self.network.evaluate_actions(obs, actions)

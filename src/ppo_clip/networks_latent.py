@@ -10,7 +10,7 @@ from torch.distributions import Categorical, Normal
 class LatentActorCritic(nn.Module):
     """Actor-Critic para observaciones latentes 1D."""
 
-    def __init__(self, observation_space: Box, action_space) -> None:
+    def __init__(self, observation_space: Box, action_space, hidden_dim: int | None = None) -> None:
         super().__init__()
         if len(observation_space.shape) != 1:
             raise ValueError("LatentActorCritic espera observaciones planas (1D).")
@@ -19,15 +19,29 @@ class LatentActorCritic(nn.Module):
 
         latent_dim = int(np.prod(observation_space.shape))
 
+        self.hidden_dim = hidden_dim
+
+        if hidden_dim and hidden_dim > 0:
+            self.feature_extractor = nn.Sequential(
+                nn.Linear(latent_dim, hidden_dim),
+                nn.ReLU(),
+            )
+            actor_input = hidden_dim
+            critic_input = hidden_dim
+        else:
+            self.feature_extractor = nn.Identity()
+            actor_input = latent_dim
+            critic_input = latent_dim
+
         if self.is_discrete:
             action_dim = action_space.n
-            self.actor = nn.Linear(latent_dim, action_dim)
+            self.actor = nn.Linear(actor_input, action_dim)
             self.log_std = None
             self.register_buffer("action_low", torch.tensor(0.0))
             self.register_buffer("action_high", torch.tensor(float(action_dim - 1)))
         elif isinstance(action_space, Box):
             action_dim = int(np.prod(action_space.shape))
-            self.actor = nn.Linear(latent_dim, action_dim)
+            self.actor = nn.Linear(actor_input, action_dim)
             self.log_std = nn.Parameter(torch.zeros(action_dim))
             self.register_buffer("action_low", torch.from_numpy(action_space.low).float())
             self.register_buffer("action_high", torch.from_numpy(action_space.high).float())
@@ -35,10 +49,10 @@ class LatentActorCritic(nn.Module):
             raise TypeError("LatentActorCritic solo soporta espacios Box o Discrete.")
 
         self.action_dim = action_dim
-        self.critic = nn.Linear(latent_dim, 1)
+        self.critic = nn.Linear(critic_input, 1)
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
-        return obs
+        return self.feature_extractor(obs)
 
     def get_dist_and_value(self, obs: torch.Tensor):
         features = self.forward(obs)

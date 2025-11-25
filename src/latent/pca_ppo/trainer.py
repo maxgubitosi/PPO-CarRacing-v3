@@ -2,12 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import cv2
+import gymnasium as gym
+import numpy as np
+
 from ppo_clip import PPOTrainer
 from latent.greyscale import load_greyscale_preset
 from latent.paths import ROOT_DIR
 
 from .config import PCAPPOConfig
-from .env import create_pca_single_env, create_pca_vector_env
+from .env import PCAObservationWrapper, create_pca_single_env, create_pca_vector_env
 
 
 class PCAPPOTrainer:
@@ -25,10 +29,13 @@ class PCAPPOTrainer:
 
         self._pca_model_path = (self.project_root / config.pca_model_path).resolve()
 
+        frame_transform = self._transform_frame if config.compare_reconstruction else None
+
         self._trainer = PPOTrainer(
             config,
             vector_env_builder=self._build_vector_env,
             single_env_builder=self._build_single_env,
+            frame_transform=frame_transform,
         )
 
     def train(self) -> None:
@@ -73,3 +80,42 @@ class PCAPPOTrainer:
             continuous=cfg.continuous,
             greyscale_preset=self.greyscale_preset,
         )
+
+    def _transform_frame(self, frame: np.ndarray, env: gym.Env) -> np.ndarray:
+        array = np.asarray(frame)
+        if array.dtype != np.uint8:
+            scale = 255.0 if array.max(initial=0.0) <= 1.0 else 1.0
+            array = np.clip(array * scale, 0, 255).astype(np.uint8)
+
+        wrapper = self._find_pca_wrapper(env)
+        if wrapper is None:
+            return array
+
+        latent_stack = getattr(wrapper, "_latent_stack", None)
+        if not latent_stack:
+            return array
+
+        latest_latent = latent_stack[-1]
+        recon = wrapper.reconstruct_from_latent(latest_latent)
+        recon_rgb = self._ensure_three_channels(recon)
+        if recon_rgb.dtype != np.uint8:
+            recon_rgb = np.clip(recon_rgb * 255.0, 0, 255).astype(np.uint8)
+        recon_rgb = cv2.resize(recon_rgb, (array.shape[1], array.shape[0]))
+        return np.concatenate([array, recon_rgb], axis=1)
+
+    @staticmethod
+    def _find_pca_wrapper(env: gym.Env) -> PCAObservationWrapper | None:
+        current = env
+        while current is not None:
+            if isinstance(current, PCAObservationWrapper):
+                return current
+            current = getattr(current, "env", None)
+        return None
+
+    @staticmethod
+    def _ensure_three_channels(image: np.ndarray) -> np.ndarray:
+        if image.ndim == 2:
+            return np.stack([image] * 3, axis=-1)
+        if image.shape[2] == 1:
+            return np.repeat(image, 3, axis=2)
+        return image

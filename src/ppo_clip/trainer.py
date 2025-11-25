@@ -44,12 +44,14 @@ class PPOTrainer:
         *,
         vector_env_builder: Callable[[PPOConfig], gym.Env] | None = None,
         single_env_builder: Callable[[PPOConfig, int, str | None], gym.Env] | None = None,
+        frame_transform: Callable[[np.ndarray, gym.Env], np.ndarray] | None = None,
     ) -> None:
         self.config = config
         self.device = torch.device(config.device)
         self.project_root = Path(__file__).resolve().parents[2]
         self._vector_env_builder = vector_env_builder
         self._single_env_builder = single_env_builder
+        self._frame_transform = frame_transform
 
         set_seed(config.seed, deterministic=config.torch_deterministic)
 
@@ -442,6 +444,8 @@ class PPOTrainer:
         obs, _ = env.reset()
         frame = env.render()
         if frame is not None:
+            if self._frame_transform is not None:
+                frame = self._frame_transform(frame, env)
             frames.append(self._prepare_frame(frame))
 
         done = False
@@ -455,6 +459,8 @@ class PPOTrainer:
             done = terminated or truncated
             frame = env.render()
             if frame is not None:
+                if self._frame_transform is not None:
+                    frame = self._frame_transform(frame, env)
                 frames.append(self._prepare_frame(frame))
             steps += 1
 
