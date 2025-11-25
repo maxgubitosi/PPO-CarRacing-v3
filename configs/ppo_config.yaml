@@ -46,4 +46,4 @@ max_video_steps: 1000
 no_video: false
 
 # Resume
-resume: results/models/ppo_clip/ppo_clip_20251122-085610/ppo_clip_update_11700.pt
+resume: null

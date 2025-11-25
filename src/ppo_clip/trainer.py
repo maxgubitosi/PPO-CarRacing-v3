@@ -5,17 +5,18 @@ from collections import defaultdict
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
-from typing import Dict
+from typing import Callable, Dict
 
 import imageio.v2 as imageio
 import numpy as np
 import torch
+import gymnasium as gym
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 try:
     from torch.serialization import add_safe_globals
-except ImportError:  # pragma: no cover - compatibility for older torch
+except ImportError:
     add_safe_globals = None
 
 from environment import create_single_env, create_vector_env
@@ -27,9 +28,9 @@ from .rollout_buffer import RolloutBuffer
 
 
 class _NullSummaryWriter:
-    """No-op writer used when artifact logging is disabled."""
+    """Escritor nulo utilizado cuando no se registran artefactos."""
 
-    def __getattr__(self, name):  # pragma: no cover - simple utility
+    def __getattr__(self, name):
         def noop(*args, **kwargs):
             return None
 
@@ -37,36 +38,38 @@ class _NullSummaryWriter:
 
 
 class PPOTrainer:
-    def __init__(self, config: PPOConfig) -> None:
+    def __init__(
+        self,
+        config: PPOConfig,
+        *,
+        vector_env_builder: Callable[[PPOConfig], gym.Env] | None = None,
+        single_env_builder: Callable[[PPOConfig, int, str | None], gym.Env] | None = None,
+    ) -> None:
         self.config = config
         self.device = torch.device(config.device)
         self.project_root = Path(__file__).resolve().parents[2]
+        self._vector_env_builder = vector_env_builder
+        self._single_env_builder = single_env_builder
 
         set_seed(config.seed, deterministic=config.torch_deterministic)
 
-        self.env = create_vector_env(
-            config.env_id,
-            config.num_envs,
-            config.seed,
-            offroad_penalty=config.offroad_penalty,
-            max_offroad_seconds=config.max_offroad_seconds,
-            continuous=config.continuous,
-            frame_skip_between_frames=config.frame_skip,
-            num_stack=config.num_stack,
-        )
-        self.eval_env_seeds = [config.seed + 10 + i for i in range(config.eval_episodes)]
-        self.eval_env_index = 0
-        self.eval_env = (
-            create_single_env(
+        if self._vector_env_builder:
+            self.env = self._vector_env_builder(config)
+        else:
+            self.env = create_vector_env(
                 config.env_id,
-                self.eval_env_seeds[self.eval_env_index],
-                render_mode=None,
+                config.num_envs,
+                config.seed,
                 offroad_penalty=config.offroad_penalty,
                 max_offroad_seconds=config.max_offroad_seconds,
                 continuous=config.continuous,
                 frame_skip_between_frames=config.frame_skip,
                 num_stack=config.num_stack,
             )
+        self.eval_env_seeds = [config.seed + 10 + i for i in range(config.eval_episodes)]
+        self.eval_env_index = 0
+        self.eval_env = (
+            self._build_single_env(self.eval_env_seeds[self.eval_env_index], render_mode=None)
             if config.track_eval
             else None
         )
@@ -76,18 +79,15 @@ class PPOTrainer:
 
         self.agent = PPOClipAgent(obs_space, action_space, config)
 
-        # Store resume info - will be set by load_checkpoint if resuming
         self._resume_step = 0
         self._resume_update = 0
         
-        # Calculate total updates for THIS training run
+        # Núm total de updates para la corrida actual
         self.num_updates = config.total_timesteps // (config.num_steps * config.num_envs)
         
-        # NOTE: Learning rate scheduler is created AFTER potential checkpoint load
-        # to ensure correct remaining_updates calculation
         self.lr_scheduler = None
 
-        # Detectar si el espacio de acción es discreto
+        # Detectar tipo de espacio de acción (discreto o continuo)
         from gymnasium.spaces import Discrete
         is_discrete = isinstance(action_space, Discrete)
         action_dim = action_space.n if is_discrete else int(np.prod(action_space.shape))
@@ -131,7 +131,7 @@ class PPOTrainer:
         self.profile_history: list[dict[str, float]] = []
         self.completed_steps = 0
         
-        # Create LR scheduler (will be recreated in load_checkpoint if resuming)
+        # Crear scheduler (se recrea al reanudar entrenamiento)
         self._create_lr_scheduler()
 
     def _create_lr_scheduler(self) -> None:
@@ -140,33 +140,28 @@ class PPOTrainer:
             self.lr_scheduler = None
             return
         
-        # Calculate remaining updates from current position to target
         remaining_updates = self.num_updates - self._resume_update
         
-        # CRITICAL: Reset all optimizer state related to schedulers
-        # LambdaLR stores base_lrs internally, so we need to ensure a clean slate
-        # Delete the old scheduler completely before creating a new one
+        # Restablecer cualquier scheduler previo para evitar heredar estado
         if hasattr(self, 'lr_scheduler') and self.lr_scheduler is not None:
             del self.lr_scheduler
             self.lr_scheduler = None
         
-        # Explicitly set the base_lrs in the optimizer to current learning_rate
-        # This ensures LambdaLR uses the correct base
+        # Forzar que el optimizer use la tasa actual como base
         for param_group in self.agent.optimizer.param_groups:
             param_group['initial_lr'] = self.config.learning_rate
             param_group['lr'] = self.config.learning_rate
         
-        # DEBUG: Print what we're about to use
-        print(f"\n[DEBUG _create_lr_scheduler]")
-        print(f"  config.learning_rate: {self.config.learning_rate:.6f}")
-        print(f"  config.lr_end: {self.config.lr_end:.6f}")
-        print(f"  num_updates: {self.num_updates}")
-        print(f"  _resume_update: {self._resume_update}")
-        print(f"  remaining_updates: {remaining_updates}")
-        print(f"  Current optimizer LR BEFORE scheduler creation: {self.agent.optimizer.param_groups[0]['lr']:.6f}")
+        if self.config.verbose:
+            print(f"\n[DEBUG _create_lr_scheduler]")
+            print(f"  config.learning_rate: {self.config.learning_rate:.6f}")
+            print(f"  config.lr_end: {self.config.lr_end:.6f}")
+            print(f"  num_updates: {self.num_updates}")
+            print(f"  _resume_update: {self._resume_update}")
+            print(f"  remaining_updates: {remaining_updates}")
+            print(f"  LR antes del scheduler: {self.agent.optimizer.param_groups[0]['lr']:.6f}")
         
         def lr_lambda(update_relative):
-            # update_relative starts at 0 when scheduler is created/resumed
             if remaining_updates <= 0:
                 return self.config.lr_end / self.config.learning_rate
             progress = update_relative / remaining_updates
@@ -177,9 +172,10 @@ class PPOTrainer:
             lr_lambda=lr_lambda
         )
         
-        print(f"  Current optimizer LR AFTER scheduler creation: {self.agent.optimizer.param_groups[0]['lr']:.6f}")
-        print(f"  Lambda at step 0: {lr_lambda(0):.6f}")
-        print(f"  Expected LR (base * lambda): {self.config.learning_rate * lr_lambda(0):.6f}\n")
+        if self.config.verbose:
+            print(f"  LR tras crear scheduler: {self.agent.optimizer.param_groups[0]['lr']:.6f}")
+            print(f"  Lambda inicial: {lr_lambda(0):.6f}")
+            print(f"  LR esperado: {self.config.learning_rate * lr_lambda(0):.6f}\n")
 
     def train(self) -> None:
         obs, _ = self.env.reset(seed=self.config.seed)
@@ -213,8 +209,7 @@ class PPOTrainer:
                 actions = sample["action"].cpu().numpy()
                 next_obs, rewards, terminated, truncated, infos = self.env.step(actions)
 
-                # Reward shaping: si está habilitado, limita rewards positivos a +1.0 para estabilidad
-                # Mantiene costos por frame (-0.1) y penalización por salirse (-100) sin modificar
+                # Reward shaping opcional (limitar rewards positivos)
                 if self.config.reward_shaping:
                     rewards = np.clip(rewards, a_min=None, a_max=1.0)
 
@@ -280,7 +275,6 @@ class PPOTrainer:
 
             self.buffer.reset()
 
-            # Update learning rate scheduler
             if self.lr_scheduler is not None:
                 self.lr_scheduler.step()
 
@@ -337,7 +331,7 @@ class PPOTrainer:
     
     def _log_action_distribution(self, global_step: int) -> None:
         """Log action distribution from the rollout buffer."""
-        actions = self.buffer.actions.cpu().numpy()  # Shape: (num_steps, num_envs, action_dim)
+        actions = self.buffer.actions.cpu().numpy()  # (num_steps, num_envs, action_dim)
         
         # Aplanar para obtener todas las acciones del rollout
         actions_flat = actions.reshape(-1, actions.shape[-1])
@@ -414,13 +408,14 @@ class PPOTrainer:
         self.writer.add_scalar("eval/episode_length", float(np.mean(lengths)), global_step)
         self.writer.add_scalar("eval/death_rate", float(np.mean(deaths)), global_step)  # % de episodios que murieron
         
-        print(
-            f"Eval @ {global_step}: "
-            f"return={np.mean(returns):.2f}±{np.std(returns):.2f} "
-            f"(max={np.max(returns):.2f}, min={np.min(returns):.2f}), "
-            f"length={np.mean(lengths):.0f}, "
-            f"death_rate={np.mean(deaths)*100:.0f}%"
-        )
+        if self.config.verbose:
+            print(
+                f"Eval @ {global_step}: "
+                f"return={np.mean(returns):.2f}±{np.std(returns):.2f} "
+                f"(max={np.max(returns):.2f}, min={np.min(returns):.2f}), "
+                f"length={np.mean(lengths):.0f}, "
+                f"death_rate={np.mean(deaths)*100:.0f}%"
+            )
 
     def _save_checkpoint(self, update: int, global_step: int) -> None:
         if not (self.write_artifacts and self.checkpoint_dir):
@@ -441,16 +436,7 @@ class PPOTrainer:
             return
         env_seed = self.eval_env_seeds[self.eval_env_index]
         self.eval_env_index = (self.eval_env_index + 1) % len(self.eval_env_seeds)
-        env = create_single_env(
-            self.config.env_id,
-            env_seed,
-            render_mode="rgb_array",
-            offroad_penalty=self.config.offroad_penalty,
-            max_offroad_seconds=self.config.max_offroad_seconds,
-            continuous=self.config.continuous,
-            frame_skip_between_frames=self.config.frame_skip,
-            num_stack=self.config.num_stack,
-        )
+        env = self._build_single_env(env_seed, render_mode="rgb_array")
 
         frames = []
         obs, _ = env.reset()
@@ -513,40 +499,53 @@ class PPOTrainer:
         if agent_state is None:
             raise ValueError("Checkpoint missing agent state")
 
-        # Backwards compatibility: legacy checkpoints may store config inside agent state
+        # Compatibilidad hacia atrás: checkpoints viejos pueden incluir config en estado del agente
         if "config" in agent_state:
             agent_state = {k: v for k, v in agent_state.items() if k in {"model", "optimizer"}}
 
-        # Load the agent state (model + optimizer)
         self.agent.load_state_dict(agent_state)
         
-        # CRITICAL: Override the optimizer's learning rate with the current config's learning_rate
-        # This allows changing the LR when resuming from a checkpoint
+        # Sobrescribir el LR del optimizador con el valor actual del config
         for param_group in self.agent.optimizer.param_groups:
             param_group['lr'] = self.config.learning_rate
         
-        print(f"\n[Checkpoint Loaded]")
-        print(f"  Resumed from update {self._resume_update}, step {self._resume_step:,}")
-        print(f"  Optimizer LR was set to: {self.config.learning_rate:.6f}")
+        if self.config.verbose:
+            print(f"\n[Checkpoint Loaded]")
+            print(f"  Resumed from update {self._resume_update}, step {self._resume_step:,}")
+            print(f"  Optimizer LR was set to: {self.config.learning_rate:.6f}")
 
-        # Recalculate num_updates based on new total_timesteps (may have changed)
+        # Recalcular updates según los nuevos timesteps totales
         self.num_updates = self.config.total_timesteps // (self.config.num_steps * self.config.num_envs)
         remaining_updates = self.num_updates - self._resume_update
         total_steps_remaining = remaining_updates * self.config.num_steps * self.config.num_envs
         
-        # Recreate the LR scheduler with updated remaining_updates
+        # Recrear el scheduler de LR con los updates restantes
         self._create_lr_scheduler()
         
         current_lr = self.agent.optimizer.param_groups[0]["lr"]
         
-        print(f"\n{'='*70}")
-        print(f"LR Scheduler Configuration:")
-        print(f"  Checkpoint: Update {self._resume_update}, Step {self._resume_step:,}")
-        print(f"  Target: Update {self.num_updates}, Step {self.config.total_timesteps:,}")
-        print(f"  Remaining: {remaining_updates} updates ({total_steps_remaining:,} steps)")
-        print(f"  LR Schedule: {current_lr:.6f} → {self.config.lr_end:.6f}")
-        print(f"  LR will decay linearly over the next {total_steps_remaining:,} steps")
-        print(f"{'='*70}\n")
+        if self.config.verbose:
+            print(f"\n{'='*70}")
+            print(f"LR Scheduler Configuration:")
+            print(f"  Checkpoint: Update {self._resume_update}, Step {self._resume_step:,}")
+            print(f"  Target: Update {self.num_updates}, Step {self.config.total_timesteps:,}")
+            print(f"  Remaining: {remaining_updates} updates ({total_steps_remaining:,} steps)")
+            print(f"  LR Schedule: {current_lr:.6f} → {self.config.lr_end:.6f}")
+            print(f"  LR will decay linearly over the next {total_steps_remaining:,} steps")
+            print(f"{'='*70}\n")
 
-        # Ensure writer resumes with existing logs
         self.writer.add_text("resume", f"Resumed from {checkpoint_path}")
+
+    def _build_single_env(self, seed: int, render_mode: str | None) -> gym.Env:
+        if self._single_env_builder:
+            return self._single_env_builder(self.config, seed, render_mode)
+        return create_single_env(
+            self.config.env_id,
+            seed,
+            render_mode,
+            offroad_penalty=self.config.offroad_penalty,
+            max_offroad_seconds=self.config.max_offroad_seconds,
+            continuous=self.config.continuous,
+            frame_skip_between_frames=self.config.frame_skip,
+            num_stack=self.config.num_stack,
+        )

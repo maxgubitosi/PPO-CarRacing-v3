@@ -1,3 +1,4 @@
+python==3.10.19
 absl-py==2.3.1
 alembic==1.17.0
 box2d-py==2.3.5

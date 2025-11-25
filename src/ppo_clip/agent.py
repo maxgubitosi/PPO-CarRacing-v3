@@ -26,7 +26,12 @@ class PPOClipAgent:
         self.config = config
         self.device = torch.device(config.device)
         self.network = create_actor_critic(observation_space, action_space).to(self.device)
-        self.optimizer = torch.optim.Adam(self.network.parameters(), lr=config.learning_rate, eps=1e-5)
+        self.optimizer = torch.optim.Adam(
+            self.network.parameters(),
+            lr=config.learning_rate,
+            eps=1e-5,
+            weight_decay=config.weight_decay,
+        )
         self.is_discrete = isinstance(action_space, Discrete)
 
     def sample(self, obs: torch.Tensor) -> Dict[str, torch.Tensor]:

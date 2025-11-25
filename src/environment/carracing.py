@@ -278,5 +278,6 @@ __all__ = [
     "create_single_env",
     "CarRacingPreprocess",
     "FrameStackWrapper",
-    "OffRoadTruncationWrapper",
+    "OffRoadPenaltyWrapper",
+    "OffRoadTruncationWrapper"
 ]

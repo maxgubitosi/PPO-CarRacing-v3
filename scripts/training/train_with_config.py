@@ -1,4 +1,4 @@
-"""Train PPO agent with configuration from YAML file."""
+"""Entrena un agente PPO usando una configuración YAML."""
 from __future__ import annotations
 
 import argparse
@@ -15,9 +15,8 @@ SRC_DIR = ROOT_DIR / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-import torch
-
 from ppo_clip import PPOConfig, PPOTrainer
+from utils import resolve_device
 
 
 def load_config(config_path: Path) -> dict:
@@ -90,14 +89,7 @@ def main() -> None:
         yaml_config["learning_rate"] = float(yaml_config["learning_rate"])
     
     # Handle device selection
-    device = yaml_config.get("device", "auto")
-    if device == "auto":
-        if torch.cuda.is_available():
-            device = "cuda"
-        elif getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
-            device = "mps"
-        else:
-            device = "cpu"
+    device = resolve_device(yaml_config.get("device", "auto"))
     
     # Create PPO config
     config = PPOConfig(
@@ -131,6 +123,7 @@ def main() -> None:
         offroad_penalty=yaml_config["offroad_penalty"],
         continuous=not yaml_config["discrete"],
         reward_shaping=yaml_config["reward_shaping"],
+        verbose=yaml_config.get("verbose", False),
     )
     
     # Create trainer

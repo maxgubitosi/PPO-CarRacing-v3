@@ -13,9 +13,8 @@ SRC_DIR = ROOT_DIR / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-import torch
-
 from ppo_clip import PPOConfig, PPOTrainer
+from utils import resolve_device
 
 
 def parse_args() -> argparse.Namespace:
@@ -57,20 +56,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--discrete", action="store_true", help="Use discrete action space (5 actions). Default is continuous (Box(3,))")
     parser.add_argument("--reward-shaping", action="store_true", help="Apply reward shaping (clip positive rewards to +1.0) for training stability")
     parser.add_argument("--resume", type=str, default=None, help="Checkpoint (.pt) path to resume from")
+    parser.add_argument("--verbose", action="store_true", help="mensajes de debug en cli")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
 
-    device = args.device
-    if device == "auto":
-        if torch.cuda.is_available():
-            device = "cuda"
-        elif getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
-            device = "mps"
-        else:
-            device = "cpu"
+    device = resolve_device(args.device)
 
     config = PPOConfig(
         total_timesteps=args.total_timesteps,
@@ -103,6 +96,7 @@ def main() -> None:
         offroad_penalty=args.offroad_penalty,
         continuous=not args.discrete, 
         reward_shaping=args.reward_shaping,
+        verbose=args.verbose,
     )
 
     trainer = PPOTrainer(config)

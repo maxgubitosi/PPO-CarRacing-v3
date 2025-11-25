@@ -18,6 +18,7 @@ from .data import (
 )
 from .paths import ensure_dir
 from .greyscale import GreyscalePreset
+from utils import resolve_device
 
 
 @dataclass
@@ -161,22 +162,8 @@ def train_beta_vae(
     """Train a beta-VAE on the provided images and save weights under output_dir."""
     ensure_dir(output_dir)
 
-    mps_available = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
-
-    if device is None:
-        if mps_available:
-            device = "mps"
-        elif torch.cuda.is_available():
-            device = "cuda"
-        else:
-            device = "cpu"
-    else:
-        device = device.lower()
-        if device == "mps" and not mps_available:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-        elif device.startswith("cuda") and not torch.cuda.is_available():
-            device = "mps" if mps_available else "cpu"
-
+    device_choice = device or "auto"
+    device_name = resolve_device(device_choice)
     torch.manual_seed(config.seed)
 
     if target_size is not None:
@@ -198,8 +185,8 @@ def train_beta_vae(
         greyscale_preset=greyscale_preset,
     )
     sample_shape = tuple(dataset[0].shape)
-    torch_device = torch.device(device)
-    use_pin_memory = device.startswith("cuda")
+    torch_device = torch.device(device_name)
+    use_pin_memory = device_name.startswith("cuda")
 
     loader = DataLoader(
         dataset,

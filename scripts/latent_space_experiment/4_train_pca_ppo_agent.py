@@ -5,8 +5,6 @@ import sys
 from pathlib import Path
 import warnings
 
-import torch
-
 warnings.filterwarnings("ignore", category=UserWarning, module="pygame.pkgdata")
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -14,156 +12,100 @@ SRC_DIR = ROOT_DIR / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
+import yaml
+
 from latent.pca_ppo import PCAPPOConfig, PCAPPOTrainer  # noqa: E402
 from latent.greyscale import load_greyscale_preset  # noqa: E402
 from latent.paths import GREYSCALE_PRESETS_PATH  # noqa: E402
+from utils import resolve_device  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train PPO agent on PCA-transformed CarRacing observations.")
-    parser.add_argument("--total-timesteps", type=int, default=1_000_000)
-    parser.add_argument("--num-envs", type=int, default=4)
-    parser.add_argument("--num-steps", type=int, default=256)
-    parser.add_argument("--num-minibatches", type=int, default=4)
-    parser.add_argument("--update-epochs", type=int, default=8)
-    parser.add_argument("--learning-rate", type=float, default=1e-3)
-    parser.add_argument("--gamma", type=float, default=0.99)
-    parser.add_argument("--gae-lambda", type=float, default=0.95)
-    parser.add_argument("--clip-coef", type=float, default=0.2)
-    parser.add_argument("--ent-coef", type=float, default=0.0)
-    parser.add_argument("--value-coef", type=float, default=0.5)
-    parser.add_argument("--max-grad-norm", type=float, default=0.5)
-    parser.add_argument("--target-kl", type=float, default=None)
-    parser.add_argument("--seed", type=int, default=123)
-    parser.add_argument("--device", type=str, choices=["auto", "cpu", "cuda", "mps"], default="auto")
-    parser.add_argument("--torch-deterministic", action="store_true")
-    parser.add_argument("--eval-episodes", type=int, default=3)
-    parser.add_argument("--eval-interval", type=int, default=50)
-    parser.add_argument("--save-interval", type=int, default=50)
-    parser.add_argument("--video-interval-minutes", type=float, default=None)
-    parser.add_argument("--max-video-steps", type=int, default=1000)
-    parser.add_argument("--max-offroad-seconds", type=float, default=2.0)
-    parser.add_argument("--offroad-penalty", type=float, default=None, nargs="?")
-    parser.add_argument("--resume", type=str, default=None, help="Checkpoint (.pt) path to resume from")
-    parser.add_argument("--pca-model-path", type=Path, default=Path("scripts/latent_space_experiment/models/pca/dim_012/pca_model.pkl"))
-    parser.add_argument("--num-stack", type=int, default=4)
-    parser.add_argument(
-        "--frame-skip",
-        type=int,
-        default=1,
-        help="Number of environment frames to skip between stacked PCA observations",
-    )
-    parser.add_argument("--crop-ratio", type=float, default=0.13)
-    parser.add_argument("--resize-height", type=int, default=48)
-    parser.add_argument("--resize-width", type=int, default=48)
-    parser.add_argument("--ridge-lambda", type=float, default=1e-3)
-    parser.add_argument(
-        "--log-root",
-        type=Path,
-        default=Path("scripts/latent_space_experiment/tensorboard_logs/ppo_latent"),
-        help="Directory (relative to repo root) where TensorBoard logs for the latent PPO run are stored.",
-    )
-    parser.add_argument(
-        "--checkpoint-root",
-        type=Path,
-        default=Path("scripts/latent_space_experiment/models/pca_ppo_runs"),
-        help="Directory for saving PCA PPO checkpoints.",
-    )
-    parser.add_argument(
-        "--video-root",
-        type=Path,
-        default=Path("scripts/latent_space_experiment/videos/ppo_latent"),
-        help="Directory for saving PCA PPO policy videos.",
-    )
-    parser.add_argument(
-        "--discrete",
-        action="store_true",
-        help="Use the discrete (5-action) CarRacing action space instead of the continuous steering/brake/gas.",
-    )
-    parser.add_argument("--no-eval", action="store_true")
-    parser.add_argument(
-        "--greyscale-presets-path",
-        type=Path,
-        default=GREYSCALE_PRESETS_PATH,
-        help="JSONL file with greyscale presets for preprocessing.",
-    )
-    parser.add_argument(
-        "--greyscale-label",
-        type=str,
-        default="veryheavy-medium",
-        help="Preset label to use for preprocessing (empty string to disable).",
-    )
+    parser = argparse.ArgumentParser(description="Train PCA PPO agent.")
+    parser.add_argument("--config", type=str, required=True, help="YAML config path (e.g., configs/pca_ppo_config.yaml)")
+    parser.add_argument("--resume", type=str, default=None, help="Override checkpoint path to resume from")
+    parser.add_argument("--device", type=str, choices=["auto", "cpu", "cuda", "mps"], default=None)
     return parser.parse_args()
 
 
-def resolve_device(choice: str) -> str:
-    if choice != "auto":
-        return choice
-    if torch.cuda.is_available():
-        return "cuda"
-    if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
-        return "mps"
-    return "cpu"
+def load_yaml_config(path: Path) -> dict:
+    with path.open("r", encoding="utf-8") as handle:
+        return yaml.safe_load(handle)
 
 
 def main() -> None:
     args = parse_args()
-    device = resolve_device(args.device)
+    config_path = Path(args.config)
+    if not config_path.exists():
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+
+    yaml_cfg = load_yaml_config(config_path)
+    if args.resume is not None:
+        yaml_cfg["resume"] = args.resume
+    if args.device is not None:
+        yaml_cfg["device"] = args.device
+
+    device = resolve_device(yaml_cfg.get("device", "auto"))
+
     greyscale_preset = None
-    if args.greyscale_label:
-        preset_path = Path(args.greyscale_presets_path).expanduser().resolve()
-        greyscale_preset = load_greyscale_preset(preset_path, args.greyscale_label)
-        args.crop_ratio = greyscale_preset.crop_ratio
-        args.resize_height = greyscale_preset.output_height
-        args.resize_width = greyscale_preset.output_width
-        print(
-            f"Using greyscale preset '{args.greyscale_label}' "
-            f"({args.resize_height}x{args.resize_width}) for PCA PPO training."
-        )
+    greyscale_label = yaml_cfg.get("greyscale_label")
+    greyscale_path = yaml_cfg.get("greyscale_presets_path")
+    if greyscale_label:
+        preset_path = Path(greyscale_path or GREYSCALE_PRESETS_PATH).expanduser().resolve()
+        greyscale_preset = load_greyscale_preset(preset_path, greyscale_label)
+        yaml_cfg["crop_ratio"] = greyscale_preset.crop_ratio
+        yaml_cfg["resize_height"] = greyscale_preset.output_height
+        yaml_cfg["resize_width"] = greyscale_preset.output_width
+        yaml_cfg["greyscale_presets_path"] = greyscale_path or GREYSCALE_PRESETS_PATH
 
     config = PCAPPOConfig(
-        total_timesteps=args.total_timesteps,
-        num_envs=args.num_envs,
-        num_steps=args.num_steps,
-        num_minibatches=args.num_minibatches,
-        update_epochs=args.update_epochs,
-        gamma=args.gamma,
-        gae_lambda=args.gae_lambda,
-        clip_coef=args.clip_coef,
-        ent_coef=args.ent_coef,
-        value_coef=args.value_coef,
-        learning_rate=args.learning_rate,
-        max_grad_norm=args.max_grad_norm,
-        target_kl=args.target_kl,
-        seed=args.seed,
+        total_timesteps=yaml_cfg["total_timesteps"],
+        num_envs=yaml_cfg["num_envs"],
+        num_steps=yaml_cfg["num_steps"],
+        num_minibatches=yaml_cfg["num_minibatches"],
+        update_epochs=yaml_cfg["update_epochs"],
+        gamma=yaml_cfg["gamma"],
+        gae_lambda=yaml_cfg["gae_lambda"],
+        clip_coef=yaml_cfg["clip_coef"],
+        ent_coef=yaml_cfg["ent_coef"],
+        value_coef=yaml_cfg["value_coef"],
+        learning_rate=yaml_cfg["learning_rate"],
+        max_grad_norm=yaml_cfg["max_grad_norm"],
+        target_kl=yaml_cfg["target_kl"],
+        seed=yaml_cfg["seed"],
         device=device,
-        torch_deterministic=args.torch_deterministic,
-        track_eval=not args.no_eval,
-        eval_episodes=args.eval_episodes,
-        eval_interval=args.eval_interval,
-        save_interval=args.save_interval,
-        video_interval_minutes=args.video_interval_minutes,
-        max_video_steps=args.max_video_steps,
-        max_offroad_seconds=args.max_offroad_seconds,
-        offroad_penalty=args.offroad_penalty,
-        pca_model_path=args.pca_model_path,
-        num_stack=args.num_stack,
-        frame_skip=args.frame_skip,
-        crop_ratio=args.crop_ratio,
-        resize_height=args.resize_height,
-        resize_width=args.resize_width,
-        ridge_lambda=args.ridge_lambda,
-        log_root=args.log_root,
-        checkpoint_root=args.checkpoint_root,
-        video_root=args.video_root,
-        continuous=not args.discrete,
-        greyscale_presets_path=args.greyscale_presets_path if greyscale_preset else None,
-        greyscale_label=args.greyscale_label if greyscale_preset else None,
+        torch_deterministic=yaml_cfg["torch_deterministic"],
+        track_eval=not yaml_cfg.get("no_eval", False),
+        eval_episodes=yaml_cfg["eval_episodes"],
+        eval_interval=yaml_cfg["eval_interval"],
+        save_interval=yaml_cfg["save_interval"],
+        video_interval_minutes=yaml_cfg["video_interval_minutes"],
+        max_video_steps=yaml_cfg["max_video_steps"],
+        max_offroad_seconds=yaml_cfg["max_offroad_seconds"],
+        offroad_penalty=yaml_cfg["offroad_penalty"],
+        pca_model_path=yaml_cfg["pca_model_path"],
+        num_stack=yaml_cfg["num_stack"],
+        frame_skip=yaml_cfg["frame_skip"],
+        crop_ratio=yaml_cfg["crop_ratio"],
+        resize_height=yaml_cfg["resize_height"],
+        resize_width=yaml_cfg["resize_width"],
+        ridge_lambda=yaml_cfg["ridge_lambda"],
+        log_root=Path(yaml_cfg["log_root"]),
+        checkpoint_root=Path(yaml_cfg["checkpoint_root"]),
+        video_root=Path(yaml_cfg["video_root"]),
+        continuous=not yaml_cfg.get("discrete", False),
+        greyscale_presets_path=yaml_cfg.get("greyscale_presets_path"),
+        greyscale_label=greyscale_label if greyscale_preset else None,
+        resume=yaml_cfg.get("resume"),
+        use_lr_scheduler=yaml_cfg.get("use_lr_scheduler", False),
+        lr_end=yaml_cfg.get("lr_end", 1e-6),
+        reward_shaping=yaml_cfg.get("reward_shaping", False),
+        verbose=yaml_cfg.get("verbose", False),
     )
 
     trainer = PCAPPOTrainer(config)
-    if args.resume:
-        trainer.load_checkpoint(Path(args.resume))
+    if config.resume:
+        trainer.load_checkpoint(Path(config.resume))
     trainer.train()
 
 

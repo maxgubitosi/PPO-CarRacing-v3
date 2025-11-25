@@ -34,3 +34,4 @@ class PCAPPOConfig(PPOConfig):
             raise ValueError("ridge_lambda must be non-negative")
         if self.greyscale_label and not self.greyscale_presets_path:
             raise ValueError("greyscale_presets_path is required when greyscale_label is provided")
+        self.weight_decay = self.ridge_lambda

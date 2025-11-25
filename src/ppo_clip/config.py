@@ -20,6 +20,7 @@ class PPOConfig:
     ent_coef: float = 0.01
     value_coef: float = 0.5
     learning_rate: float = 5e-5
+    weight_decay: float = 0.0
     use_lr_scheduler: bool = False
     lr_end: float = 1e-6
     max_grad_norm: float = 0.5
@@ -43,6 +44,7 @@ class PPOConfig:
     reward_shaping: bool = False  # Si True, aplica reward shaping (clip rewards positivos a +1.0)
     collect_timing_metrics: bool = False
     write_artifacts: bool = True
+    verbose: bool = False
 
     def __post_init__(self) -> None:
         if self.num_stack <= 0:
@@ -59,6 +61,9 @@ class PPOConfig:
 
         if self.max_offroad_seconds <= 0:
             raise ValueError("max_offroad_seconds must be positive")
+
+        if self.weight_decay < 0:
+            raise ValueError("weight_decay must be non-negative")
 
         try:
             import torch

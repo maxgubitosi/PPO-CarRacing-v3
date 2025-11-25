@@ -24,6 +24,7 @@ if str(SRC_DIR) not in sys.path:
 from environment import create_single_env  # noqa: E402
 from ppo_clip import PPOConfig  # noqa: E402
 from ppo_clip.agent import PPOClipAgent  # noqa: E402
+from utils import resolve_device  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -64,16 +65,6 @@ def parse_args() -> argparse.Namespace:
         help="If set, append a heatmap visualization of the first convolution's activations for each stacked frame.",
     )
     return parser.parse_args()
-
-
-def resolve_device(choice: str) -> str:
-    if choice != "auto":
-        return choice
-    if torch.cuda.is_available():
-        return "cuda"
-    if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
-        return "mps"
-    return "cpu"
 
 
 def _dict_to_config(config_dict: Dict[str, Any]) -> PPOConfig:
