@@ -51,6 +51,7 @@ def train_incremental_pca_models(
     crop_ratio: float | None = DEFAULT_CROP_RATIO,
     target_size: Tuple[int, int] | None = DEFAULT_TARGET_SIZE,
     greyscale_preset: GreyscalePreset | None = None,
+    resize_level: int | None = None,
 ) -> Mapping[int, dict]:
     """Fit IncrementalPCA once and export separate models for each latent dim."""
     ensure_dir(output_root)
@@ -103,6 +104,7 @@ def train_incremental_pca_models(
                 else target_size
             ),
             "channel_count": 1 if greyscale_preset else 3,
+            "resize_level": resize_level,
         }
         if greyscale_preset is not None:
             metadata["greyscale_preset"] = greyscale_preset.to_dict()

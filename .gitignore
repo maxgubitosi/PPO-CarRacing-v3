@@ -19,3 +19,5 @@ models/
 
 !configs/ppo_config_example.yaml
 configs/
+configs/
+scripts/latent_space_experiment_copy

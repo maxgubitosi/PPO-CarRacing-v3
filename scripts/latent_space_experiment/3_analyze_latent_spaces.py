@@ -4,8 +4,9 @@ import argparse
 import json
 import math
 import sys
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Tuple
 
 import matplotlib
 
@@ -20,9 +21,6 @@ SRC_DIR = ROOT_DIR / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from dataclasses import dataclass
-from typing import Dict, Tuple
-
 from latent.data import (  # noqa: E402
     DEFAULT_CROP_RATIO,
     DEFAULT_TARGET_SIZE,
@@ -36,6 +34,7 @@ from latent.paths import (  # noqa: E402
     PLOTS_AND_METRICS_DIR,
     GREYSCALE_PRESETS_PATH,
     ensure_dir,
+    variant_subdir,
 )
 from latent.vae import BetaVAE  # noqa: E402
 from latent.greyscale import load_greyscale_preset, GreyscalePreset  # noqa: E402
@@ -108,6 +107,12 @@ def parse_args() -> argparse.Namespace:
         help="Fraction of image height to trim from the bottom before analysis.",
     )
     parser.add_argument(
+        "--resize-level",
+        type=int,
+        default=None,
+        help="Optional integer factor (>1) applied to processed frames and output directories.",
+    )
+    parser.add_argument(
         "--resize-height",
         type=int,
         default=DEFAULT_TARGET_SIZE[0],
@@ -132,6 +137,12 @@ def parse_args() -> argparse.Namespace:
         help="Preset label to apply. Provide empty string to disable greyscale preprocessing.",
     )
     return parser.parse_args()
+
+
+def _scaled_dimension(value: int, resize_level: int | None) -> int:
+    if resize_level is None or resize_level <= 1:
+        return value
+    return max(1, int(math.ceil(value / resize_level)))
 
 
 def compute_mse(original: np.ndarray, reconstruction: np.ndarray) -> float:
@@ -210,10 +221,10 @@ def analyse_pca(
     latent_dim: int,
     sample_images: np.ndarray,
     output_root: Path,
-    model_dir: Path,
+    pca_root: Path,
     grid_count: int,
 ) -> Dict[str, float]:
-    model_path = model_dir / "pca" / f"dim_{latent_dim:03d}" / "pca_model.pkl"
+    model_path = pca_root / f"dim_{latent_dim:03d}" / "pca_model.pkl"
     if not model_path.exists():
         print(f"[PCA] Missing model for z={latent_dim}, skipping.")
         return {}
@@ -261,12 +272,12 @@ def analyse_beta_vae(
     latent_dim: int,
     sample_images: np.ndarray,
     output_root: Path,
-    model_dir: Path,
+    beta_root: Path,
     grid_count: int,
     device: str | None,
 ) -> Dict[str, float]:
-    model_path = model_dir / "beta_vae" / f"dim_{latent_dim:03d}" / "beta_vae.pt"
-    metrics_path = model_dir / "beta_vae" / f"dim_{latent_dim:03d}" / "metrics.json"
+    model_path = beta_root / f"dim_{latent_dim:03d}" / "beta_vae.pt"
+    metrics_path = beta_root / f"dim_{latent_dim:03d}" / "metrics.json"
     if not model_path.exists():
         print(f"[beta-VAE] Missing model for z={latent_dim}, skipping.")
         return {}
@@ -345,8 +356,8 @@ def load_samples_for_spec(
     return cache[spec]
 
 
-def load_pca_metadata(model_dir: Path, latent_dim: int) -> Dict:
-    metadata_path = model_dir / "pca" / f"dim_{latent_dim:03d}" / "metadata.json"
+def load_pca_metadata(pca_root: Path, latent_dim: int) -> Dict:
+    metadata_path = pca_root / f"dim_{latent_dim:03d}" / "metadata.json"
     if metadata_path.exists():
         return json.loads(metadata_path.read_text(encoding="utf-8"))
     return {}
@@ -369,8 +380,12 @@ def spec_from_metadata(metadata: Dict, default_spec: SampleSpec) -> SampleSpec:
 
 def main() -> None:
     args = parse_args()
+    if args.resize_level is not None and args.resize_level < 1:
+        raise ValueError("--resize-level must be >= 1 when specified.")
 
-    ensure_dir(args.output_dir)
+    resize_level = args.resize_level if args.resize_level and args.resize_level > 1 else None
+
+    output_root = ensure_dir(variant_subdir(Path(args.output_dir), resize_level))
     image_paths = collect_image_paths(args.dataset_dir)
     sample_paths = shuffle_and_limit(image_paths, args.num_samples, args.seed)
 
@@ -378,6 +393,12 @@ def main() -> None:
     if args.greyscale_label:
         preset_path = Path(args.greyscale_presets_path).expanduser().resolve()
         greyscale_preset = load_greyscale_preset(preset_path, args.greyscale_label)
+        if resize_level is not None:
+            greyscale_preset = replace(
+                greyscale_preset,
+                output_height=_scaled_dimension(greyscale_preset.output_height, resize_level),
+                output_width=_scaled_dimension(greyscale_preset.output_width, resize_level),
+            )
         crop_ratio = None
         target_size = None
         print(
@@ -387,7 +408,10 @@ def main() -> None:
     else:
         crop_ratio = args.crop_ratio if args.crop_ratio > 0 else None
         target_size = (
-            (args.resize_height, args.resize_width)
+            (
+                _scaled_dimension(args.resize_height, resize_level),
+                _scaled_dimension(args.resize_width, resize_level),
+            )
             if args.resize_height > 0 and args.resize_width > 0
             else None
         )
@@ -414,6 +438,10 @@ def main() -> None:
         if canonical not in selected_models:
             selected_models.append(canonical)
 
+    model_dir = Path(args.model_dir)
+    pca_root = variant_subdir(model_dir / "pca", resize_level)
+    beta_root = variant_subdir(model_dir / "beta_vae", resize_level)
+
     analysis_summary: Dict[str, Dict[int, Dict[str, float]]] = {
         "pca": {},
         "beta_vae": {},
@@ -422,29 +450,29 @@ def main() -> None:
     for latent_dim in args.latent_dims:
         print(f"\n=== Analysing latent dimension {latent_dim} ===")
         if "pca" in selected_models:
-            metadata = load_pca_metadata(args.model_dir, latent_dim)
+            metadata = load_pca_metadata(pca_root, latent_dim)
             spec = spec_from_metadata(metadata, default_spec)
             pca_samples = load_samples_for_spec(sample_paths, spec, sample_cache)
             analysis_summary["pca"][latent_dim] = analyse_pca(
                 latent_dim,
                 pca_samples,
-                args.output_dir,
-                args.model_dir,
+                output_root,
+                pca_root,
                 args.grid_count,
             )
         if "beta-vae" in selected_models:
             analysis_summary["beta_vae"][latent_dim] = analyse_beta_vae(
                 latent_dim,
                 sample_images,
-                args.output_dir,
-                args.model_dir,
+                output_root,
+                beta_root,
                 args.grid_count,
                 args.device,
             )
 
-    summary_path = args.output_dir / "analysis_summary.json"
+    summary_path = output_root / "analysis_summary.json"
     summary_path.write_text(json.dumps(analysis_summary, indent=2), encoding="utf-8")
-    print(f"\nAnalysis complete. Results saved to {args.output_dir}")
+    print(f"\nAnalysis complete. Results saved to {output_root}")
 
 
 if __name__ == "__main__":

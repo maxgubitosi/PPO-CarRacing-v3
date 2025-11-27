@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import math
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Mapping, Sequence
 
@@ -21,6 +23,7 @@ from latent.paths import (
     MODEL_DIR,
     GREYSCALE_PRESETS_PATH,
     ensure_dir,
+    variant_subdir,
 )  # noqa: E402
 from latent.reducers import train_incremental_pca_models  # noqa: E402
 from latent.vae import BetaVAEConfig, train_beta_vae  # noqa: E402
@@ -152,6 +155,12 @@ def parse_args() -> argparse.Namespace:
         help="Fraction of the image height to trim from the bottom (set <=0 to disable).",
     )
     parser.add_argument(
+        "--resize-level",
+        type=int,
+        default=None,
+        help="Optional integer factor (>1) to further downscale processed frames and namespace outputs.",
+    )
+    parser.add_argument(
         "--resize-height",
         type=int,
         default=48,
@@ -176,6 +185,12 @@ def parse_args() -> argparse.Namespace:
         help="Preset label to apply. Provide an empty string to disable greyscale preprocessing.",
     )
     return parser.parse_args()
+
+
+def _scaled_dimension(value: int, resize_level: int | None) -> int:
+    if resize_level is None or resize_level <= 1:
+        return value
+    return max(1, int(math.ceil(value / resize_level)))
 
 
 def plot_pca_total_variance(
@@ -216,6 +231,10 @@ def main() -> None:
     latent_dims = sorted({int(dim) for dim in args.latent_dims})
     if not latent_dims:
         raise ValueError("At least one latent dimension must be provided.")
+    if args.resize_level is not None and args.resize_level < 1:
+        raise ValueError("--resize-level must be >= 1 when specified.")
+
+    resize_level = args.resize_level if args.resize_level and args.resize_level > 1 else None
 
     model_aliases = {
         "pca": "pca",
@@ -240,6 +259,12 @@ def main() -> None:
     if args.greyscale_label:
         preset_path = Path(args.greyscale_presets_path).expanduser().resolve()
         greyscale_preset = load_greyscale_preset(preset_path, args.greyscale_label)
+        if resize_level is not None:
+            greyscale_preset = replace(
+                greyscale_preset,
+                output_height=_scaled_dimension(greyscale_preset.output_height, resize_level),
+                output_width=_scaled_dimension(greyscale_preset.output_width, resize_level),
+            )
         print(
             f"Using greyscale preset '{args.greyscale_label}' → "
             f"{greyscale_preset.output_height}x{greyscale_preset.output_width}, "
@@ -250,14 +275,17 @@ def main() -> None:
     else:
         crop_ratio = args.crop_ratio if args.crop_ratio > 0 else None
         target_size = (
-            (args.resize_height, args.resize_width)
+            (
+                _scaled_dimension(args.resize_height, resize_level),
+                _scaled_dimension(args.resize_width, resize_level),
+            )
             if args.resize_height > 0 and args.resize_width > 0
             else None
         )
 
     if "pca" in selected_models:
         print("\n=== Training PCA models ===")
-        pca_root = ensure_dir(Path(args.output_dir) / "pca")
+        pca_root = ensure_dir(variant_subdir(Path(args.output_dir) / "pca", resize_level))
         pca_stats = train_incremental_pca_models(
             image_paths,
             latent_dims=latent_dims,
@@ -268,6 +296,7 @@ def main() -> None:
             crop_ratio=crop_ratio,
             target_size=target_size,
             greyscale_preset=greyscale_preset,
+            resize_level=resize_level,
         )
         for latent_dim in latent_dims:
             if latent_dim in pca_stats:
@@ -288,8 +317,9 @@ def main() -> None:
 
     if "beta-vae" in selected_models:
         print("\n=== Training beta-VAE models ===")
+        beta_root = ensure_dir(variant_subdir(Path(args.output_dir) / "beta_vae", resize_level))
         for latent_dim in latent_dims:
-            vae_dir = ensure_dir(Path(args.output_dir) / "beta_vae" / f"dim_{latent_dim:03d}")
+            vae_dir = ensure_dir(beta_root / f"dim_{latent_dim:03d}")
             vae_paths = (
                 shuffle_and_limit(image_paths, args.vae_max_samples, args.seed)
                 if args.vae_max_samples is not None
