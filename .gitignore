@@ -5,7 +5,8 @@ results/log/
 results/models/ppo_clip/
 results/tensorboard_logs/ppo_clip/
 results/videos/ppo_clip/
-results/plots/
+results/plot_from_tensorboard/jsons/
+results/plot_from_tensorboard/plots/
 
 !scripts/latent_space_experiment/models/pca/
 !scripts/latent_space_experiment/models/pca/**

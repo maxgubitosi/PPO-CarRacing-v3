@@ -1,7 +1,7 @@
 # PPO Configuration
 
 # Training
-total_timesteps: 30000000
+total_timesteps: 10000000
 seed: 42
 
 # Environment
@@ -17,7 +17,7 @@ reward_shaping: true
 num_steps: 128
 num_minibatches: 4
 update_epochs: 10
-learning_rate: 0.00015
+learning_rate: 0.0001
 use_lr_scheduler: true
 lr_end: 0.000001
 gamma: 0.99
@@ -46,4 +46,4 @@ max_video_steps: 1000
 no_video: false
 
 # Resume
-resume: null
+resume: results/models/ppo_clip/ppo_clip_20251127-113538/ppo_clip_update_2400.pt
