@@ -15,6 +15,7 @@ class PCAPPOConfig(PPOConfig):
     crop_ratio: float = 0.13
     resize_height: int = 48
     resize_width: int = 48
+    resize_level: int | None = None
     ridge_lambda: float = 1e-3
     log_root: Path = field(default_factory=lambda: Path("tensorboard_logs/pca_ppo"))
     checkpoint_root: Path = field(default_factory=lambda: Path("models/pca_ppo"))

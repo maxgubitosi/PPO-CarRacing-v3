@@ -15,3 +15,16 @@ def ensure_dir(path: Path) -> Path:
     """Create directory (and parents) if it does not exist."""
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def resize_variant_suffix(resize_level: int | None) -> str | None:
+    """Return the directory suffix for a given resize level (>=2)."""
+    if resize_level is None or resize_level <= 1:
+        return None
+    return f"resize_lvl{int(resize_level)}"
+
+
+def variant_subdir(base: Path, resize_level: int | None) -> Path:
+    """Append the resize variant suffix to a directory if needed."""
+    suffix = resize_variant_suffix(resize_level)
+    return base / suffix if suffix else base

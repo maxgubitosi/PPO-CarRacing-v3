@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import math
 import sys
+from dataclasses import replace
 from pathlib import Path
 import warnings
 
@@ -18,6 +20,12 @@ from latent.pca_ppo import PCAPPOConfig, PCAPPOTrainer  # noqa: E402
 from latent.greyscale import load_greyscale_preset  # noqa: E402
 from latent.paths import GREYSCALE_PRESETS_PATH  # noqa: E402
 from utils import resolve_device  # noqa: E402
+
+
+def _scaled_dimension(value: int, resize_level: int | None) -> int:
+    if not resize_level or resize_level <= 1:
+        return value
+    return max(1, int(math.ceil(value / resize_level)))
 
 
 def parse_args() -> argparse.Namespace:
@@ -46,6 +54,13 @@ def main() -> None:
         yaml_cfg["device"] = args.device
 
     device = resolve_device(yaml_cfg.get("device", "auto"))
+    resize_level = yaml_cfg.get("resize_level")
+    if resize_level is not None:
+        resize_level = int(resize_level)
+        if resize_level < 1:
+            raise ValueError("resize_level must be >= 1")
+    else:
+        resize_level = None
 
     greyscale_preset = None
     greyscale_label = yaml_cfg.get("greyscale_label")
@@ -53,6 +68,12 @@ def main() -> None:
     if greyscale_label:
         preset_path = Path(greyscale_path or GREYSCALE_PRESETS_PATH).expanduser().resolve()
         greyscale_preset = load_greyscale_preset(preset_path, greyscale_label)
+        if resize_level and resize_level > 1:
+            greyscale_preset = replace(
+                greyscale_preset,
+                output_height=_scaled_dimension(greyscale_preset.output_height, resize_level),
+                output_width=_scaled_dimension(greyscale_preset.output_width, resize_level),
+            )
         yaml_cfg["crop_ratio"] = greyscale_preset.crop_ratio
         yaml_cfg["resize_height"] = greyscale_preset.output_height
         yaml_cfg["resize_width"] = greyscale_preset.output_width
@@ -91,6 +112,7 @@ def main() -> None:
         crop_ratio=yaml_cfg["crop_ratio"],
         resize_height=yaml_cfg["resize_height"],
         resize_width=yaml_cfg["resize_width"],
+        resize_level=resize_level,
         ridge_lambda=yaml_cfg["ridge_lambda"],
         log_root=Path(yaml_cfg["log_root"]),
         checkpoint_root=Path(yaml_cfg["checkpoint_root"]),

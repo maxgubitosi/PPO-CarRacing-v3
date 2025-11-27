@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+from dataclasses import replace
 from pathlib import Path
 
 import cv2
@@ -14,6 +16,12 @@ from .config import PCAPPOConfig
 from .env import PCAObservationWrapper, create_pca_single_env, create_pca_vector_env
 
 
+def _scaled_dimension(value: int, resize_level: int | None) -> int:
+    if not resize_level or resize_level <= 1:
+        return value
+    return max(1, int(math.ceil(value / resize_level)))
+
+
 class PCAPPOTrainer:
     """Adaptador que reutiliza el PPOTrainer estándar con entornos PCA."""
 
@@ -25,7 +33,14 @@ class PCAPPOTrainer:
             if config.greyscale_presets_path is None:
                 raise ValueError("greyscale_presets_path es obligatorio cuando se usa greyscale_label.")
             preset_path = (self.project_root / config.greyscale_presets_path).resolve()
-            self.greyscale_preset = load_greyscale_preset(preset_path, config.greyscale_label)
+            preset = load_greyscale_preset(preset_path, config.greyscale_label)
+            if config.resize_level and config.resize_level > 1:
+                preset = replace(
+                    preset,
+                    output_height=_scaled_dimension(preset.output_height, config.resize_level),
+                    output_width=_scaled_dimension(preset.output_width, config.resize_level),
+                )
+            self.greyscale_preset = preset
 
         self._pca_model_path = (self.project_root / config.pca_model_path).resolve()
 

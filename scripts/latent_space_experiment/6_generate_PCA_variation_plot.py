@@ -19,7 +19,7 @@ SRC_DIR = ROOT_DIR / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from latent.paths import PLOTS_AND_METRICS_DIR, ensure_dir  # noqa: E402
+from latent.paths import PLOTS_AND_METRICS_DIR, ensure_dir, variant_subdir  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -86,6 +86,15 @@ def parse_args() -> argparse.Namespace:
             "If omitted, every available component is shown."
         ),
     )
+    parser.add_argument(
+        "--resize-level",
+        type=int,
+        default=None,
+        help=(
+            "Optional integer factor (>1) to namespace the default plot directory when "
+            "running multiple resized experiments."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -108,11 +117,12 @@ def _infer_latent_dim(pca_model) -> int:
     return int(pca_model.components_.shape[0])
 
 
-def _resolve_output_path(model_path: Path, specified_output: Path | None) -> Path:
+def _resolve_output_path(model_path: Path, specified_output: Path | None, resize_level: int | None) -> Path:
     if specified_output is not None:
         return specified_output.expanduser().resolve()
     model_dir_name = model_path.parent.name or "pca_model"
-    default_path = PLOTS_AND_METRICS_DIR / f"pca_variations_{model_dir_name}.png"
+    default_root = variant_subdir(PLOTS_AND_METRICS_DIR, resize_level if resize_level and resize_level > 1 else None)
+    default_path = default_root / f"pca_variations_{model_dir_name}.png"
     return default_path
 
 
@@ -258,9 +268,13 @@ def generate_variation_grid(
 
 def main() -> None:
     args = parse_args()
+    if args.resize_level is not None and args.resize_level < 1:
+        raise ValueError("--resize-level must be >= 1 when specified.")
+
+    resize_level = args.resize_level if args.resize_level and args.resize_level > 1 else None
     model_path = args.pca_model
     metadata_path = args.metadata
-    output_path = _resolve_output_path(model_path, args.output)
+    output_path = _resolve_output_path(model_path, args.output, resize_level)
 
     saved_path = generate_variation_grid(
         model_path=model_path,
