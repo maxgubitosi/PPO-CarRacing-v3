@@ -345,7 +345,8 @@ class PPOTrainer:
             action_freq = action_counts / action_counts.sum()
             
             # Nombres de acciones discretas en CarRacing
-            action_names = ["Do Nothing", "Left", "Right", "Gas", "Brake"]
+            # Según documentación de Gymnasium: 0=do nothing, 1=steer right, 2=steer left, 3=gas, 4=brake
+            action_names = ["Do Nothing", "Right", "Left", "Gas", "Brake"]
             for i, (name, freq) in enumerate(zip(action_names, action_freq)):
                 self.writer.add_scalar(f"actions/discrete/{name}", freq, global_step)
         else:
