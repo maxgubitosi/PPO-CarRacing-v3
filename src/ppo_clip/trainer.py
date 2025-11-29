@@ -67,6 +67,7 @@ class PPOTrainer:
                 continuous=config.continuous,
                 frame_skip_between_frames=config.frame_skip,
                 num_stack=config.num_stack,
+                steering_constraint=config.steering_constraint,
             )
         self.eval_env_seeds = [config.seed + 10 + i for i in range(config.eval_episodes)]
         self.eval_env_index = 0
@@ -330,7 +331,7 @@ class PPOTrainer:
         
         # Loggear distribución de acciones del buffer
         self._log_action_distribution(global_step)
-    
+
     def _log_action_distribution(self, global_step: int) -> None:
         """Log action distribution from the rollout buffer."""
         actions = self.buffer.actions.cpu().numpy()  # (num_steps, num_envs, action_dim)
@@ -341,13 +342,15 @@ class PPOTrainer:
         if self.buffer.is_discrete:
             # Para acciones discretas: contar frecuencia de cada acción
             # actions_flat será de shape (num_steps * num_envs, 1)
-            action_counts = np.bincount(actions_flat.flatten().astype(int), minlength=5)
-            action_freq = action_counts / action_counts.sum()
-            
-            # Nombres de acciones discretas en CarRacing
-            # Según documentación de Gymnasium: 0=do nothing, 1=steer right, 2=steer left, 3=gas, 4=brake
-            action_names = ["Do Nothing", "Right", "Left", "Gas", "Brake"]
-            for i, (name, freq) in enumerate(zip(action_names, action_freq)):
+            flattened = actions_flat.flatten().astype(int)
+            action_space = getattr(self.env, "single_action_space", None)
+            num_actions = int(getattr(action_space, "n", flattened.max(initial=0) + 1))
+            action_counts = np.bincount(flattened, minlength=num_actions)
+            total = action_counts.sum() or 1
+            action_freq = action_counts / total
+
+            action_names = self._resolve_discrete_action_names(num_actions)
+            for name, freq in zip(action_names, action_freq):
                 self.writer.add_scalar(f"actions/discrete/{name}", freq, global_step)
         else:
             # Para acciones continuas: estadísticas de steering, gas, brake
@@ -368,6 +371,22 @@ class PPOTrainer:
             self.writer.add_histogram("actions/continuous/steering_hist", steering, global_step)
             self.writer.add_histogram("actions/continuous/gas_hist", gas, global_step)
             self.writer.add_histogram("actions/continuous/brake_hist", brake, global_step)
+
+    def _resolve_discrete_action_names(self, num_actions: int) -> list[str]:
+        canonical = ["Do Nothing", "Right", "Left", "Gas", "Brake"]
+        constraint = (self.config.steering_constraint or "").strip().lower()
+        if constraint == "only_left":
+            removed = 1  # eliminar "Right"
+        elif constraint == "only_right":
+            removed = 2  # eliminar "Left"
+        else:
+            removed = None
+
+        if removed is not None:
+            filtered = [name for idx, name in enumerate(canonical) if idx != removed]
+        else:
+            filtered = canonical
+        return filtered[:num_actions]
 
     def _evaluate(self, global_step: int) -> None:
         if self.eval_env is None:
@@ -555,4 +574,5 @@ class PPOTrainer:
             continuous=self.config.continuous,
             frame_skip_between_frames=self.config.frame_skip,
             num_stack=self.config.num_stack,
+            steering_constraint=self.config.steering_constraint,
         )

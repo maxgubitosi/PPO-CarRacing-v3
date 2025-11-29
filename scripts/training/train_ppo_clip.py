@@ -57,6 +57,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--reward-shaping", action="store_true", help="Apply reward shaping (clip positive rewards to +1.0) for training stability")
     parser.add_argument("--resume", type=str, default=None, help="Checkpoint (.pt) path to resume from")
     parser.add_argument("--verbose", action="store_true", help="mensajes de debug en cli")
+    parser.add_argument(
+        "--steering-constraint",
+        type=str,
+        choices=["only_left", "only_right"],
+        default=None,
+        help="Restrict the discrete action set so the agent can only steer in one direction.",
+    )
     return parser.parse_args()
 
 
@@ -97,6 +104,7 @@ def main() -> None:
         continuous=not args.discrete, 
         reward_shaping=args.reward_shaping,
         verbose=args.verbose,
+        steering_constraint=args.steering_constraint,
     )
 
     trainer = PPOTrainer(config)

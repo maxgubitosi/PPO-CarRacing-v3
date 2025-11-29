@@ -124,6 +124,7 @@ def main() -> None:
         continuous=not yaml_config["discrete"],
         reward_shaping=yaml_config["reward_shaping"],
         verbose=yaml_config.get("verbose", False),
+        steering_constraint=yaml_config.get("steering_constraint"),
     )
     
     # Create trainer
@@ -139,9 +140,21 @@ def main() -> None:
     print("\n" + "="*80)
     print("Starting training with configuration:")
     print("="*80)
+    action_space = getattr(trainer.env, "single_action_space", None)
+    if action_space is not None:
+        if hasattr(action_space, "n"):
+            action_desc = f"Discrete ({action_space.n} actions)"
+        elif hasattr(action_space, "shape"):
+            shape = tuple(int(dim) for dim in action_space.shape)
+            action_desc = f"Box{shape}"
+        else:
+            action_desc = str(action_space)
+    else:
+        action_desc = "Unknown"
+
     print(f"  Total timesteps: {config.total_timesteps:,}")
     print(f"  Num environments: {config.num_envs}")
-    print(f"  Action space: {'Discrete (5 actions)' if not config.continuous else 'Continuous (Box(3,))'}")
+    print(f"  Action space: {action_desc}")
     print(f"  Reward shaping: {config.reward_shaping}")
     print(f"  Device: {config.device}")
     print(f"  Seed: {config.seed}")

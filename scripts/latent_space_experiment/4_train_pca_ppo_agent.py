@@ -126,6 +126,7 @@ def main() -> None:
         verbose=yaml_cfg.get("verbose", False),
         latent_hidden_dim=yaml_cfg.get("latent_hidden_dim"),
         compare_reconstruction=yaml_cfg.get("compare_reconstruction", True),
+        steering_constraint=yaml_cfg.get("steering_constraint"),
     )
 
     trainer = PCAPPOTrainer(config)

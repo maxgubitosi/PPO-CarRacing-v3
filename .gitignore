@@ -1,6 +1,11 @@
 __pycache__/
 .venv/
 
+# git ignore all ds store files
+.DS_Store
+*/.DS_Store
+
+
 results/log/
 results/models/ppo_clip/
 results/tensorboard_logs/ppo_clip/
@@ -21,3 +26,5 @@ models/
 configs/
 configs/
 scripts/latent_space_experiment_copy
+results/.DS_Store
+results/videos/.DS_Store
