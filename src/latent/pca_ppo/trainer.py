@@ -77,6 +77,7 @@ class PCAPPOTrainer:
             max_offroad_seconds=cfg.max_offroad_seconds,
             continuous=cfg.continuous,
             greyscale_preset=self.greyscale_preset,
+            steering_constraint=cfg.steering_constraint,
         )
 
     def _build_single_env(self, cfg: PCAPPOConfig, seed: int, render_mode: str | None):
@@ -94,6 +95,7 @@ class PCAPPOTrainer:
             max_offroad_seconds=cfg.max_offroad_seconds,
             continuous=cfg.continuous,
             greyscale_preset=self.greyscale_preset,
+            steering_constraint=cfg.steering_constraint,
         )
 
     def _transform_frame(self, frame: np.ndarray, env: gym.Env) -> np.ndarray:

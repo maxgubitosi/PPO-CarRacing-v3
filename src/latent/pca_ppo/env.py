@@ -11,7 +11,7 @@ import numpy as np
 from gymnasium.spaces import Box
 from gymnasium.vector import AsyncVectorEnv, SyncVectorEnv
 
-from environment.carracing import OffRoadPenaltyWrapper
+from environment.carracing import OffRoadPenaltyWrapper, SteeringConstraintWrapper
 from latent.greyscale import GreyscalePreset
 
 
@@ -171,6 +171,7 @@ def _make_env(
     max_offroad_seconds: float,
     continuous: bool = True,
     greyscale_preset: GreyscalePreset | None = None,
+    steering_constraint: str | None = None,
 ) -> Callable[[], gym.Env]:
     def thunk() -> gym.Env:
         env = gym.make(
@@ -195,6 +196,8 @@ def _make_env(
             max_offroad_seconds=max_offroad_seconds,
             penalty=offroad_penalty,
         )
+        if steering_constraint:
+            env = SteeringConstraintWrapper(env, steering_constraint)
         env.reset(seed=seed)
         env.action_space.seed(seed)
         return env
@@ -217,6 +220,7 @@ def create_pca_vector_env(
     max_offroad_seconds: float,
     continuous: bool = True,
     greyscale_preset: GreyscalePreset | None = None,
+    steering_constraint: str | None = None,
 ) -> SyncVectorEnv | AsyncVectorEnv:
     env_fns = [
         _make_env(
@@ -233,6 +237,7 @@ def create_pca_vector_env(
             max_offroad_seconds=max_offroad_seconds,
             continuous=continuous,
             greyscale_preset=greyscale_preset,
+            steering_constraint=steering_constraint,
         )
         for i in range(num_envs)
     ]
@@ -256,6 +261,7 @@ def create_pca_single_env(
     max_offroad_seconds: float,
     continuous: bool,
     greyscale_preset: GreyscalePreset | None = None,
+    steering_constraint: str | None = None,
 ) -> gym.Env:
     env_fn = _make_env(
         env_id,
@@ -271,5 +277,6 @@ def create_pca_single_env(
         max_offroad_seconds=max_offroad_seconds,
         continuous=continuous,
         greyscale_preset=greyscale_preset,
+        steering_constraint=steering_constraint,
     )
     return env_fn()

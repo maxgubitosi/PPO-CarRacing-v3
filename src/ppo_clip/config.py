@@ -46,6 +46,7 @@ class PPOConfig:
     write_artifacts: bool = True
     verbose: bool = False
     latent_hidden_dim: int | None = None
+    steering_constraint: str | None = None
 
     def __post_init__(self) -> None:
         if self.num_stack <= 0:
@@ -65,6 +66,18 @@ class PPOConfig:
 
         if self.weight_decay < 0:
             raise ValueError("weight_decay must be non-negative")
+
+        if self.steering_constraint:
+            normalized = self.steering_constraint.strip().lower()
+            valid = {"only_left", "only_right"}
+            if normalized not in valid:
+                raise ValueError(
+                    f"Invalid steering_constraint '{self.steering_constraint}'. "
+                    "Valid options: only_left, only_right."
+                )
+            if self.continuous:
+                raise ValueError("steering_constraint requires discrete action space (set discrete: true)")
+            self.steering_constraint = normalized
 
         try:
             import torch

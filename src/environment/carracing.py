@@ -6,7 +6,8 @@ from typing import Callable
 import cv2
 import gymnasium as gym
 import numpy as np
-from gymnasium.spaces import Box
+from gymnasium.spaces import Box, Discrete
+from gymnasium import spaces
 from gymnasium.vector import AsyncVectorEnv, SyncVectorEnv
 
 
@@ -184,6 +185,7 @@ def _make_env(
     continuous: bool = True,
     frame_skip_between_frames: int = 0,
     num_stack: int = 4,
+    steering_constraint: str | None = None,
 ) -> Callable[[], gym.Env]:
     """
     Crea un environment CarRacing-v3.
@@ -213,6 +215,8 @@ def _make_env(
             max_offroad_seconds=max_offroad_seconds,
             penalty=offroad_penalty,
         )
+        if steering_constraint:
+            env = SteeringConstraintWrapper(env, steering_constraint)
         env.reset(seed=seed)
         env.action_space.seed(seed)
         return env
@@ -231,6 +235,7 @@ def create_vector_env(
     continuous: bool = True,
     frame_skip_between_frames: int = 0,
     num_stack: int = 4,
+    steering_constraint: str | None = None,
 ) -> gym.Env:
     env_fns = [
         _make_env(
@@ -242,6 +247,7 @@ def create_vector_env(
             continuous=continuous,
             frame_skip_between_frames=frame_skip_between_frames,
             num_stack=num_stack,
+            steering_constraint=steering_constraint,
         )
         for idx in range(num_envs)
     ]
@@ -260,6 +266,7 @@ def create_single_env(
     continuous: bool = True,
     frame_skip_between_frames: int = 0,
     num_stack: int = 4,
+    steering_constraint: str | None = None,
 ) -> gym.Env:
     return _make_env(
         env_id,
@@ -270,6 +277,7 @@ def create_single_env(
         continuous=continuous,
         frame_skip_between_frames=frame_skip_between_frames,
         num_stack=num_stack,
+        steering_constraint=steering_constraint,
     )()
 
 
@@ -281,3 +289,32 @@ __all__ = [
     "OffRoadPenaltyWrapper",
     "OffRoadTruncationWrapper"
 ]
+class SteeringConstraintWrapper(gym.ActionWrapper):
+    def __init__(self, env: gym.Env, constraint: str) -> None:
+        super().__init__(env)
+        normalized = constraint.strip().lower()
+        valid = {"only_left", "only_right"}
+        if normalized not in valid:
+            raise ValueError(
+                f"Unknown steering constraint '{constraint}'. Valid options: only_left, only_right."
+            )
+        if not isinstance(env.action_space, Discrete):
+            raise TypeError("SteeringConstraintWrapper requires a Discrete action space.")
+
+        removed_action = 1 if normalized == "only_left" else 2
+        if removed_action >= env.action_space.n:
+            raise ValueError(
+                "Underlying environment does not expose the expected discrete steering actions."
+            )
+
+        self.constraint = normalized
+        self._action_map = [idx for idx in range(env.action_space.n) if idx != removed_action]
+        self.action_space = Discrete(len(self._action_map))
+
+    def action(self, action: int) -> int:
+        mapped_idx = int(action)
+        if mapped_idx < 0 or mapped_idx >= len(self._action_map):
+            raise gym.error.InvalidAction(
+                f"Action {action} is outside the constrained action space of size {len(self._action_map)}."
+            )
+        return self._action_map[mapped_idx]
