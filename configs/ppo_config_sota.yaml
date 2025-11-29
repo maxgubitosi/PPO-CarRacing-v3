@@ -1,26 +1,35 @@
 # PPO Configuration
 
 # Training
-total_timesteps: 10000000
+total_timesteps: 12000000    # 1st run
+# total_timesteps: 24000000  # 2nd run
+# total_timesteps: 30000000  # 3rd run
+
 seed: 42
 
 # Environment
 num_envs: 16
 num_stack: 2
 frame_skip: 2
-max_offroad_seconds: 5.0
-offroad_penalty: null
+
+max_offroad_seconds: 2.0     # 1st run
+# max_offroad_seconds: 7.0   # 2nd run
+# max_offroad_seconds: 15.0  # 3rd run
+
+offroad_penalty: null        # 1st run
+offroad_penalty: 5.0         # 2nd & 3rdrun 
+
 discrete: true 
 reward_shaping: true
-steering_constraint: "only_left"  # Bloquea girar a la izquierda
 
 # PPO Hyperparameters
 num_steps: 128
 num_minibatches: 4
 update_epochs: 10
-learning_rate: 0.0003
+learning_rate: 0.0003        # 1st & 2nd run
+# learning_rate: 0.00015      # 3rd run
 use_lr_scheduler: true
-lr_end: 0.000001
+lr_end: 0.000001 
 gamma: 0.99
 gae_lambda: 0.95
 clip_coef: 0.2
