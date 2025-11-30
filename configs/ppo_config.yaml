@@ -1,18 +1,18 @@
 # PPO Configuration
 
 # Training
-total_timesteps: 10000000
+total_timesteps: 12000000
 seed: 42
 
 # Environment
 num_envs: 16
 num_stack: 2
 frame_skip: 2
-max_offroad_seconds: 5.0
+max_offroad_seconds: 2.0
 offroad_penalty: null
 discrete: true 
 reward_shaping: true
-steering_constraint: "only_left"  # Bloquea girar a la izquierda
+# steering_constraint: "only_left" 
 
 # PPO Hyperparameters
 num_steps: 128

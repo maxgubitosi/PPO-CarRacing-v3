@@ -75,8 +75,6 @@ class PPOConfig:
                     f"Invalid steering_constraint '{self.steering_constraint}'. "
                     "Valid options: only_left, only_right."
                 )
-            if self.continuous:
-                raise ValueError("steering_constraint requires discrete action space (set discrete: true)")
             self.steering_constraint = normalized
 
         try:

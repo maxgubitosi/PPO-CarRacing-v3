@@ -215,8 +215,14 @@ def _make_env(
             max_offroad_seconds=max_offroad_seconds,
             penalty=offroad_penalty,
         )
+        
+        # Apply steering constraint based on action space type
         if steering_constraint:
-            env = SteeringConstraintWrapper(env, steering_constraint)
+            if continuous:
+                env = SteeringConstraintContinuous(env, steering_constraint)
+            else:
+                env = SteeringConstraintWrapper(env, steering_constraint)
+        
         env.reset(seed=seed)
         env.action_space.seed(seed)
         return env
@@ -318,3 +324,70 @@ class SteeringConstraintWrapper(gym.ActionWrapper):
                 f"Action {action} is outside the constrained action space of size {len(self._action_map)}."
             )
         return self._action_map[mapped_idx]
+
+
+class SteeringConstraintContinuous(gym.ActionWrapper):
+    """
+    Restricts steering to only left or right for continuous action space.
+    
+    For 'only_right': Maps steering range from [-1, 1] to [0, 1] (only right turns)
+    For 'only_left': Maps steering range from [-1, 1] to [-1, 0] (only left turns)
+    
+    The agent still outputs values in [-1, 1], but they get remapped to the allowed range.
+    This preserves the agent's ability to learn fine-grained control within the constraint.
+    """
+    
+    def __init__(self, env: gym.Env, constraint: str) -> None:
+        super().__init__(env)
+        normalized = constraint.strip().lower()
+        valid = {"only_left", "only_right"}
+        if normalized not in valid:
+            raise ValueError(
+                f"Unknown steering constraint '{constraint}'. Valid options: only_left, only_right."
+            )
+        
+        if not isinstance(env.action_space, Box):
+            raise TypeError("SteeringConstraintContinuous requires a Box action space.")
+        
+        if env.action_space.shape[0] != 3:
+            raise ValueError("Expected Box action space with shape (3,) for [steering, gas, brake]")
+        
+        self.constraint = normalized
+        
+        # Modify action space to reflect the constraint
+        # Original: steering in [-1, 1], gas in [0, 1], brake in [0, 1]
+        if normalized == "only_right":
+            # Only allow right steering: [0, 1] for steering
+            self.action_space = Box(
+                low=np.array([0.0, 0.0, 0.0], dtype=np.float32),
+                high=np.array([1.0, 1.0, 1.0], dtype=np.float32),
+                dtype=np.float32
+            )
+        else:  # only_left
+            # Only allow left steering: [-1, 0] for steering
+            self.action_space = Box(
+                low=np.array([-1.0, 0.0, 0.0], dtype=np.float32),
+                high=np.array([0.0, 1.0, 1.0], dtype=np.float32),
+                dtype=np.float32
+            )
+    
+    def action(self, action: np.ndarray) -> np.ndarray:
+        """Remap steering action to allowed range."""
+        action = np.array(action, dtype=np.float32).copy()
+        
+        if self.constraint == "only_right":
+            # Agent outputs steering in [-1, 1], remap to [0, 1]
+            # Formula: output = (input + 1) / 2
+            # -1 -> 0 (straight), 0 -> 0.5, 1 -> 1 (full right)
+            action[0] = (action[0] + 1.0) / 2.0
+            
+        else:  # only_left
+            # Agent outputs steering in [-1, 1], remap to [-1, 0]
+            # Formula: output = (input - 1) / 2
+            # -1 -> -1 (full left), 0 -> -0.5, 1 -> 0 (straight)
+            action[0] = (action[0] - 1.0) / 2.0
+        
+        # Clip to ensure we're in bounds (safety)
+        action = np.clip(action, self.env.action_space.low, self.env.action_space.high)
+        
+        return action
