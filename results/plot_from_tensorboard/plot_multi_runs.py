@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 """
-Plot multiple TensorBoard runs on the same figure.
-Reads directly from TensorBoard event files - no JSON export needed.
-
-Usage:
+Uso:
     python plot_multi_runs.py --runs run1 run2 run3 --metric charts/return_mean --title "My Plot"
     python plot_multi_runs.py --runs ppo_clip/ppo_clip_20251129-125106 sb3_ppo_clip/sb3_ppo_clip_20251129-000930 --metric charts/return_mean
 """
