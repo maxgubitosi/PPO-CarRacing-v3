@@ -133,7 +133,6 @@ def save_stats_to_csv(stats, filename=RESULTS_FILE):
     filename = Path(filename)
     filename.parent.mkdir(parents=True, exist_ok=True)
     
-    # Verificar si el archivo ya existe para agregar headers
     file_exists = filename.exists()
     
     with filename.open('a', newline='') as csvfile:
@@ -151,7 +150,7 @@ def save_stats_to_csv(stats, filename=RESULTS_FILE):
 
 def main():
     pygame.init()
-    
+    # default
     STEER_SPEED = 0.06   # cuánto cambia el volante por frame al mantener flechas
     STEER_DECAY = 0.85   # cuánto "vuelve al centro" cuando no tocás nada
     MAX_STEER = 1.0
@@ -165,7 +164,6 @@ def main():
         pygame.quit()
         return
     
-    # Cerrar ventana del nombre
     pygame.display.quit()
     
     running = True
@@ -174,7 +172,6 @@ def main():
     first_game = True  # Flag para saltar el menú en el primer juego
     
     while running:
-        # Mostrar menú solo si no es el primer juego
         if not first_game:
             pygame.init()
             screen = pygame.display.set_mode((600, 500 if episode_stats else 400))
@@ -183,7 +180,6 @@ def main():
             if not show_menu(screen, episode_stats):
                 break
             
-            # Cerrar ventana del menú
             pygame.display.quit()
         
         first_game = False
@@ -251,17 +247,13 @@ def main():
                 positive_rewards += 1
 
             if terminated or truncated:
-                # Determinar la razón de terminación
                 if truncated:
-                    # Se acabó el tiempo/límite de pasos
                     termination_reason = "timeout"
                 elif terminated:
-                    # Terminó naturalmente
                     if total_reward < -50:
                         # Crasheó (recibe -100 de penalización)
                         termination_reason = "crashed"
                     else:
-                        # Completó el circuito exitosamente
                         termination_reason = "completed"
                 else:
                     termination_reason = "unknown"
@@ -278,13 +270,11 @@ def main():
                 
                 save_stats_to_csv(episode_stats)
                 
-                # Terminar el loop de juego para volver al menú
                 playing = False
 
             # Limitar FPS para un control estable
             clock.tick(60)
         
-        # Cerrar ventana del juego antes de volver al menú
         env.close()
         pygame.quit()
         env = None

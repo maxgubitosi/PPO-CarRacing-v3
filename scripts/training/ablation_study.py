@@ -9,6 +9,8 @@ Experimentos:
 2. No-Clip: clip_coef = 10.0 (efectivamente sin clipping)
 3. No-Entropy: ent_coef = 0.0 (sin exploración)
 4. No-GAE: gae_lambda = 1.0 (Monte Carlo puro, sin smoothing)
+
+## estos no son propios de PPO, no los consideramos en el informe final
 5. No-Stack: num_stack = 1 (sin memoria temporal)
 6. No-Reward-Shaping: reward_shaping = False (rewards crudos)
 
@@ -104,7 +106,7 @@ def get_ablation_config(experiment: str) -> PPOConfig:
     config = get_baseline_config()
     
     if experiment == "baseline":
-        # No cambios, esta es la configuración de control
+        # Sin cambios, esta es la configuración de control
         pass
     
     elif experiment == "no_clip":
@@ -209,13 +211,7 @@ Experimentos disponibles:
   no_reward_shaping  - Sin reward shaping
   all                - Ejecuta todos los experimentos (incluyendo baseline)
   all_ablations      - Ejecuta solo ablaciones (sin baseline)
-
-Ejemplos:
-  python scripts/training/ablation_study.py --experiment baseline
-  python scripts/training/ablation_study.py --experiment all
-  python scripts/training/ablation_study.py --experiment all_ablations
-  python scripts/training/ablation_study.py --experiment all --skip baseline no_stack
-        """
+"""
     )
     
     parser.add_argument(

@@ -64,13 +64,6 @@ class DiscreteActorCritic(nn.Module):
     def get_dist_and_value(self, obs: torch.Tensor) -> tuple[Categorical, torch.Tensor]:
         """
         Obtiene la distribución de acciones y el valor del estado.
-        
-        Args:
-            obs: Observaciones (B, C, H, W)
-        
-        Returns:
-            dist: Distribución categórica sobre las acciones
-            value: Valor del estado (B,)
         """
         features = self.forward(obs)
         logits = self.actor(features)
@@ -79,17 +72,6 @@ class DiscreteActorCritic(nn.Module):
         return dist, value
 
     def act(self, obs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Muestrea una acción de la distribución.
-        
-        Args:
-            obs: Observaciones (B, C, H, W)
-        
-        Returns:
-            action: Acción discreta muestreada (B,)
-            log_prob: Log-probabilidad de la acción (B,)
-            value: Valor del estado (B,)
-        """
         dist, value = self.get_dist_and_value(obs)
         action = dist.sample()
         log_prob = dist.log_prob(action)
@@ -117,14 +99,7 @@ class DiscreteActorCritic(nn.Module):
 
     def act_deterministic(self, obs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
-        Selecciona la acción más probable (modo greedy).
-        
-        Args:
-            obs: Observaciones (B, C, H, W)
-        
-        Returns:
-            action: Acción con mayor probabilidad (B,)
-            value: Valor del estado (B,)
+        Selecciona la acción más probable (greedy).
         """
         dist, value = self.get_dist_and_value(obs)
         action = dist.probs.argmax(dim=-1)

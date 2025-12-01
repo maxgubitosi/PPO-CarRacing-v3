@@ -65,7 +65,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     
-    # Load configuration from YAML
+    # Cargar config desde YAML
     config_path = Path(args.config)
     if not config_path.exists():
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
@@ -74,7 +74,7 @@ def main() -> None:
     print(f"Loaded configuration from: {config_path}")
     print(f"Config: {yaml_config}")
     
-    # Override with command-line arguments if provided
+    # Sobrescribir con CLI si se proporcionan
     if args.resume is not None:
         yaml_config["resume"] = args.resume
     if args.total_timesteps is not None:
@@ -84,14 +84,11 @@ def main() -> None:
     if args.device is not None:
         yaml_config["device"] = args.device
     
-    # Convert learning_rate to float if it's a string (YAML sometimes parses scientific notation as string)
     if isinstance(yaml_config["learning_rate"], str):
         yaml_config["learning_rate"] = float(yaml_config["learning_rate"])
     
-    # Handle device selection
     device = resolve_device(yaml_config.get("device", "auto"))
     
-    # Create PPO config
     config = PPOConfig(
         total_timesteps=yaml_config["total_timesteps"],
         num_envs=yaml_config["num_envs"],
@@ -127,16 +124,15 @@ def main() -> None:
         steering_constraint=yaml_config.get("steering_constraint"),
     )
     
-    # Create trainer
     trainer = PPOTrainer(config)
     
-    # Resume from checkpoint if specified
+    # Cargar checkpoint si hay
     if yaml_config.get("resume"):
         checkpoint_path = Path(yaml_config["resume"])
         print(f"Resuming from checkpoint: {checkpoint_path}")
         trainer.load_checkpoint(checkpoint_path)
     
-    # Train
+    # Entrena
     print("\n" + "="*80)
     print("Starting training with configuration:")
     print("="*80)

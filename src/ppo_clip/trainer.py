@@ -28,12 +28,9 @@ from .rollout_buffer import RolloutBuffer
 
 
 class _NullSummaryWriter:
-    """Escritor nulo utilizado cuando no se registran artefactos."""
-
     def __getattr__(self, name):
         def noop(*args, **kwargs):
             return None
-
         return noop
 
 
@@ -181,6 +178,15 @@ class PPOTrainer:
             print(f"  LR esperado: {self.config.learning_rate * lr_lambda(0):.6f}\n")
 
     def train(self) -> None:
+        """
+        Ejecuta el bucle principal de entrenamiento PPO.
+
+        1) Recolecta rollouts. (trayectorias)
+        2) Calcula ventajas y returns. (GAE)
+        3) Actualiza la política usando los rollouts. 
+        4) Loggea métricas y guarda checkpoints periódicamente. 
+        5) Evalúa la política periódicamente. 
+        """
         obs, _ = self.env.reset(seed=self.config.seed)
         obs = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
         next_done = torch.zeros(self.config.num_envs, device=self.device)
@@ -205,6 +211,7 @@ class PPOTrainer:
                 rollout_wall_start = time.perf_counter()
                 rollout_cpu_start = time.process_time()
 
+            # 1)Recolectar trayectorias
             for step in range(self.config.num_steps):
                 with torch.no_grad():
                     sample = self.agent.sample(obs)
@@ -221,6 +228,7 @@ class PPOTrainer:
                 reward_tensor = torch.as_tensor(rewards, dtype=torch.float32, device=self.device)
                 done_tensor = torch.as_tensor(dones, dtype=torch.float32, device=self.device)
 
+                # Almacenar transición en el buffer
                 self.buffer.add(
                     obs,
                     sample["raw_action"].detach(),
@@ -234,9 +242,7 @@ class PPOTrainer:
                 next_done = done_tensor
                 global_step += self.config.num_envs
                 
-                # Actualizar barra de progreso
                 pbar.update(self.config.num_envs)
-
                 self._log_rollout_infos(infos, global_step)
 
             if profile_entry is not None:
@@ -248,7 +254,8 @@ class PPOTrainer:
             else:
                 update_wall_start = 0.0
                 update_cpu_start = 0.0
-
+            
+            # 2) GAE: calcular ventajas y returns
             with torch.no_grad():
                 _, last_values = self.agent.network.get_dist_and_value(obs)
 
@@ -258,8 +265,9 @@ class PPOTrainer:
                 gamma=self.config.gamma,
                 gae_lambda=self.config.gae_lambda,
             )
-
             metrics = defaultdict(list)
+            
+            # 3) Actualizar política usando los rollouts
             for epoch in range(self.config.update_epochs):
                 for batch in self.buffer.get(self.config.minibatch_size):
                     stats = self.agent.update(batch)
@@ -281,6 +289,7 @@ class PPOTrainer:
             if self.lr_scheduler is not None:
                 self.lr_scheduler.step()
 
+            # 4) Loggear métricas
             self._log_update_metrics(metrics, global_step, update)
 
             if profile_entry is not None:
@@ -290,6 +299,7 @@ class PPOTrainer:
                 profile_entry["total_cpu_s"] = profile_entry["rollout_cpu_s"] + profile_entry["update_cpu_s"]
                 self.profile_history.append(profile_entry)
 
+            # 5) Evaluar política periódicamente (segun param)
             if self.config.track_eval and update % self.config.eval_interval == 0:
                 self._evaluate(global_step)
 
@@ -333,7 +343,7 @@ class PPOTrainer:
         self._log_action_distribution(global_step)
 
     def _log_action_distribution(self, global_step: int) -> None:
-        """Log action distribution from the rollout buffer."""
+
         actions = self.buffer.actions.cpu().numpy()  # (num_steps, num_envs, action_dim)
         
         # Aplanar para obtener todas las acciones del rollout
@@ -341,7 +351,6 @@ class PPOTrainer:
         
         if self.buffer.is_discrete:
             # Para acciones discretas: contar frecuencia de cada acción
-            # actions_flat será de shape (num_steps * num_envs, 1)
             flattened = actions_flat.flatten().astype(int)
             action_space = getattr(self.env, "single_action_space", None)
             num_actions = int(getattr(action_space, "n", flattened.max(initial=0) + 1))
@@ -354,7 +363,6 @@ class PPOTrainer:
                 self.writer.add_scalar(f"actions/discrete/{name}", freq, global_step)
         else:
             # Para acciones continuas: estadísticas de steering, gas, brake
-            # actions_flat será de shape (num_steps * num_envs, 3)
             steering = actions_flat[:, 0]
             gas = actions_flat[:, 1]
             brake = actions_flat[:, 2]
@@ -367,7 +375,7 @@ class PPOTrainer:
             self.writer.add_scalar("actions/continuous/brake_mean", float(np.mean(brake)), global_step)
             self.writer.add_scalar("actions/continuous/brake_std", float(np.std(brake)), global_step)
             
-            # También podemos loggear histogramas (esto es más pesado, pero muy útil)
+            # loggear histogramas
             self.writer.add_histogram("actions/continuous/steering_hist", steering, global_step)
             self.writer.add_histogram("actions/continuous/gas_hist", gas, global_step)
             self.writer.add_histogram("actions/continuous/brake_hist", brake, global_step)
@@ -394,7 +402,7 @@ class PPOTrainer:
 
         returns = []
         lengths = []
-        deaths = []  # Episodios que terminaron por alejarse de la pista
+        deaths = []  # Episodios que terminaron por alejarse demasiado de la pista
 
         for idx in range(self.config.eval_episodes):
             seed = self.eval_env_seeds[self.eval_env_index]
@@ -415,7 +423,7 @@ class PPOTrainer:
                 total_reward += reward
                 steps += 1
                 
-                # Detectar muerte: reward de -100 indica que se alejó mucho de la pista
+                # Detectar muerte: reward de -100 indica que se fue demasiado de la pista
                 if reward <= -99.0:
                     died = True
 

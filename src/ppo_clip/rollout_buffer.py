@@ -17,6 +17,12 @@ class RolloutBatch:
 
 
 class RolloutBuffer:
+    """
+    Buffer para almacenar transiciones durante el rollout.
+    - Soporta tanto acciones discretas como continuas.
+    - Almacena observaciones, acciones, log-probabilidades, recompensas, valores,
+    y calcula ventajas usando GAE.
+    """
     def __init__(
         self,
         num_steps: int,
@@ -60,21 +66,19 @@ class RolloutBuffer:
         done: torch.Tensor,
         value: torch.Tensor,
     ) -> None:
+        """Almacena una transición"""
         if self._step >= self.num_steps:
             raise IndexError("RolloutBuffer is full")
 
         self.observations[self._step].copy_(obs)
         
-        # Manejo de acciones discretas vs continuas
         if self.is_discrete:
-            # Acciones discretas: shape (num_envs,)
             if action.dim() == 1:
                 self.actions[self._step].copy_(action)
             else:
                 # Si viene con batch dimension extra, hacer squeeze
                 self.actions[self._step].copy_(action.squeeze(-1))
         else:
-            # Acciones continuas: shape (num_envs, action_dim)
             self.actions[self._step].copy_(action)
         
         self.log_probs[self._step].copy_(log_prob)
@@ -91,6 +95,7 @@ class RolloutBuffer:
         gamma: float,
         gae_lambda: float,
     ) -> None:
+        """Calcula las ventajas (A) usando GAE y las returns."""
         last_advantage = torch.zeros(self.num_envs, device=self.device)
 
         for step in reversed(range(self.num_steps)):
@@ -101,6 +106,7 @@ class RolloutBuffer:
                 next_non_terminal = 1.0 - self.dones[step + 1]
                 next_values = self.values[step + 1]
 
+            # TD error: delta_t = r_t + gamma * V(s_{t+1}) - V(s_t)
             delta = (
                 self.rewards[step]
                 + gamma * next_values * next_non_terminal
@@ -109,6 +115,7 @@ class RolloutBuffer:
             last_advantage = delta + gamma * gae_lambda * next_non_terminal * last_advantage
             self.advantages[step] = last_advantage
 
+        # R = A + V (para entrenar al critico)
         self.returns = self.advantages + self.values
 
     def get(self, minibatch_size: int) -> Iterator[RolloutBatch]:
@@ -117,7 +124,6 @@ class RolloutBuffer:
 
         observations = self.observations.reshape(num_samples, *self.observations.shape[2:])
         
-        # Manejo de acciones discretas vs continuas
         if self.is_discrete:
             # Acciones discretas: mantener shape (num_samples,)
             actions = self.actions.reshape(num_samples)

@@ -57,17 +57,33 @@ class PPOClipAgent:
         return self.network.evaluate_actions(obs, actions)
 
     def update(self, batch: RolloutBatch) -> UpdateStats:
+        """
+        Realiza un paso de actualización de PPO usando el batch dado.
+        - Normaliza las ventajas.
+        - Calcula la pérdida de política con clipping.
+        - Calcula la pérdida de valor.
+        - Aplica la optimización.
+        """
+        # Normaliza las ventajas
         advantages = (batch.advantages - batch.advantages.mean()) / (batch.advantages.std(unbiased=False) + 1e-8)
 
+        # re-evalua acciones con pi_nueva
         log_prob, entropy, values = self.evaluate(batch.observations, batch.actions)
+        
+        # importance sampling con pi_nueva / pi_vieja
         ratio = (log_prob - batch.log_probs).exp()
+        
+        # Clip segun L^CLIP = E[min(r_t(theta)A_t, clip(r_t(theta), 1-epsilon, 1+epsilon)A_t)]
         unclipped = advantages * ratio
         clipped = advantages * torch.clamp(ratio, 1 - self.config.clip_coef, 1 + self.config.clip_coef)
         policy_loss = -torch.min(unclipped, clipped).mean()
 
         value_loss = F.mse_loss(batch.returns, values)
+        
+        # Loss total: pi + V + entropy_bonus
         loss = policy_loss + self.config.value_coef * value_loss - self.config.ent_coef * entropy.mean()
 
+        # grad descend con clipping
         self.optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.network.parameters(), self.config.max_grad_norm)

@@ -1,3 +1,5 @@
+# adapta el entorno para entrenar PPO mediante wrappers
+
 from __future__ import annotations
 
 from collections import deque
@@ -12,6 +14,12 @@ from gymnasium.vector import AsyncVectorEnv, SyncVectorEnv
 
 
 class CarRacingPreprocess(gym.Wrapper):
+    """
+    convierte RGB 96x96x3 a 42x48x1 y detecta si el auto está fuera de la pista
+    - recorta 13% inferior (HUD)
+    - convierte a escala de grises
+    - reduce tamaño a la mitad (48x42)
+    """
     def __init__(self, env: gym.Env) -> None:
         super().__init__(env)
         original_space = self.env.observation_space
@@ -87,6 +95,10 @@ class CarRacingPreprocess(gym.Wrapper):
 
 
 class FrameStackWrapper(gym.Wrapper):
+    """
+    - Apila N frames consecutivos
+    - permite saltar frames entre apilados y aumentar el intervalo entre observaciones
+    """
     def __init__(self, env: gym.Env, num_stack: int, frame_skip: int = 0) -> None:
         super().__init__(env)
         if num_stack < 1:
@@ -128,6 +140,10 @@ class FrameStackWrapper(gym.Wrapper):
 
 
 class OffRoadPenaltyWrapper(gym.Wrapper):
+    """
+    Termina el episodio si el auto está fuera de la pista por más de un tiempo límite
+    y aplica una penalización opcional al reward.
+    """
     def __init__(
         self,
         env: gym.Env,
@@ -192,10 +208,9 @@ def _make_env(
     
     Args:
         continuous: Si True, usa acciones continuas Box(3,). 
-                   Si False, usa acciones discretas Discrete(5) nativas del environment.
+                    Si False, usa acciones discretas Discrete(5) nativas del environment.
     """
     def thunk() -> gym.Env:
-        # Crear environment con el parámetro continuous nativo
         env = gym.make(
             env_id, 
             render_mode=render_mode,
@@ -216,7 +231,6 @@ def _make_env(
             penalty=offroad_penalty,
         )
         
-        # Apply steering constraint based on action space type
         if steering_constraint:
             if continuous:
                 env = SteeringConstraintContinuous(env, steering_constraint)
@@ -326,15 +340,10 @@ class SteeringConstraintWrapper(gym.ActionWrapper):
         return self._action_map[mapped_idx]
 
 
+# Implementado para un test puntual
 class SteeringConstraintContinuous(gym.ActionWrapper):
     """
-    Restricts steering to only left or right for continuous action space.
-    
-    For 'only_right': Maps steering range from [-1, 1] to [0, 1] (only right turns)
-    For 'only_left': Maps steering range from [-1, 1] to [-1, 0] (only left turns)
-    
-    The agent still outputs values in [-1, 1], but they get remapped to the allowed range.
-    This preserves the agent's ability to learn fine-grained control within the constraint.
+    Restringe las acciones de dirección a solo izquierda o solo derecha en un entorno continuo
     """
     
     def __init__(self, env: gym.Env, constraint: str) -> None:
@@ -353,18 +362,13 @@ class SteeringConstraintContinuous(gym.ActionWrapper):
             raise ValueError("Expected Box action space with shape (3,) for [steering, gas, brake]")
         
         self.constraint = normalized
-        
-        # Modify action space to reflect the constraint
-        # Original: steering in [-1, 1], gas in [0, 1], brake in [0, 1]
         if normalized == "only_right":
-            # Only allow right steering: [0, 1] for steering
             self.action_space = Box(
                 low=np.array([0.0, 0.0, 0.0], dtype=np.float32),
                 high=np.array([1.0, 1.0, 1.0], dtype=np.float32),
                 dtype=np.float32
             )
         else:  # only_left
-            # Only allow left steering: [-1, 0] for steering
             self.action_space = Box(
                 low=np.array([-1.0, 0.0, 0.0], dtype=np.float32),
                 high=np.array([0.0, 1.0, 1.0], dtype=np.float32),
@@ -376,18 +380,11 @@ class SteeringConstraintContinuous(gym.ActionWrapper):
         action = np.array(action, dtype=np.float32).copy()
         
         if self.constraint == "only_right":
-            # Agent outputs steering in [-1, 1], remap to [0, 1]
-            # Formula: output = (input + 1) / 2
-            # -1 -> 0 (straight), 0 -> 0.5, 1 -> 1 (full right)
             action[0] = (action[0] + 1.0) / 2.0
             
         else:  # only_left
-            # Agent outputs steering in [-1, 1], remap to [-1, 0]
-            # Formula: output = (input - 1) / 2
-            # -1 -> -1 (full left), 0 -> -0.5, 1 -> 0 (straight)
             action[0] = (action[0] - 1.0) / 2.0
         
-        # Clip to ensure we're in bounds (safety)
         action = np.clip(action, self.env.action_space.low, self.env.action_space.high)
         
         return action

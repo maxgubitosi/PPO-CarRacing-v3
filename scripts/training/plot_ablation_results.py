@@ -15,7 +15,6 @@ from typing import Dict, List, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 
-# Configuración de matplotlib para gráficos bonitos
 plt.style.use('seaborn-v0_8-darkgrid')
 plt.rcParams['figure.figsize'] = (12, 8)
 plt.rcParams['font.size'] = 11
@@ -49,7 +48,6 @@ def smooth_curve(values: np.ndarray, window: int = 50) -> np.ndarray:
     cumsum = np.cumsum(np.insert(values, 0, 0))
     smoothed = (cumsum[window:] - cumsum[:-window]) / window
     
-    # Rellenar el inicio con los valores originales
     return np.concatenate([values[:window-1], smoothed])
 
 

@@ -13,19 +13,7 @@ def create_actor_critic(
     *,
     latent_hidden_dim: int | None = None,
 ):
-    """
-    Crea una red Actor-Critic apropiada según el tipo de espacio de acción.
-    
-    Args:
-        observation_space: Espacio de observaciones del environment
-        action_space: Espacio de acciones del environment (Box o Discrete)
-    
-    Returns:
-        ActorCritic network apropiada para el espacio de acción
-    
-    Raises:
-        ValueError: Si el action_space no es Box ni Discrete
-    """
+   
     obs_dims = len(observation_space.shape)
 
     if obs_dims == 3:
