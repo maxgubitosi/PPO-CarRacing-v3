@@ -8,7 +8,19 @@ __pycache__/
 
 results/log/
 results/models/ppo_clip/
+# Exception: Include specific trained model
+!results/models/ppo_clip/ppo_clip_20251124-161508/
+!results/models/ppo_clip/ppo_clip_20251124-161508/ppo_clip_update_14600.pt
+
 results/tensorboard_logs/ppo_clip/
+# Exception: Include specific tensorboard logs
+!results/tensorboard_logs/ppo_clip/ppo_clip_20251124-161508/
+!results/tensorboard_logs/ppo_clip/ppo_clip_20251124-161508/**
+!results/tensorboard_logs/ppo_clip/ppo_clip_20251122-085610/
+!results/tensorboard_logs/ppo_clip/ppo_clip_20251122-085610/**
+!results/tensorboard_logs/ppo_clip/ppo_clip_20251121-221438/
+!results/tensorboard_logs/ppo_clip/ppo_clip_20251121-221438/**
+
 results/videos/ppo_clip/
 results/plot_from_tensorboard/jsons/
 results/plot_from_tensorboard/plots/
