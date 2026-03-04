@@ -21,6 +21,7 @@
 </p>
 
 ---
+El informe completo del proyecto está disponible en [`PPO_Car_Racing.pdf`](PPO_Car_Racing.pdf).
 
 ## Tabla de Contenidos
 
@@ -379,9 +380,3 @@ PPO-CarRacing-v3/
     ├── videos/                    # GIFs de episodios
     └── plot_from_tensorboard/     # Gráficos generados
 ```
-
----
-
-## Informe Técnico
-
-El informe completo del proyecto está disponible en [`PPO_Car_Racing.pdf`](PPO_Car_Racing.pdf).
