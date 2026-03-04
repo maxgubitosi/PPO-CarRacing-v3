@@ -21,9 +21,12 @@ results/tensorboard_logs/ppo_clip/
 !results/tensorboard_logs/ppo_clip/ppo_clip_20251121-221438/
 !results/tensorboard_logs/ppo_clip/ppo_clip_20251121-221438/**
 
-results/videos/ppo_clip/
+# Ignore per-run video folders and raw MP4s, but keep GIFs used in README
+results/videos/ppo_clip/ppo_clip_*/
+results/videos/ppo_clip/*.mp4
+
 results/plot_from_tensorboard/jsons/
-results/plot_from_tensorboard/plots/
+# Keep all plots (used in README)
 
 !scripts/latent_space_experiment/models/pca/
 !scripts/latent_space_experiment/models/pca/**
@@ -31,7 +34,6 @@ scripts/latent_space_experiment/models/beta_vae/
 scripts/latent_space_experiment/models/tsne/
 scripts/random/videos/
 tensorboard_logs/
-videos/
 models/
 
 configs/*
