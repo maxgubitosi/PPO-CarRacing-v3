@@ -41,7 +41,7 @@ El informe completo del proyecto está disponible en [`PPO_Car_Racing.pdf`](PPO_
 
 ## Resultados
 
-### Curva de Entrenamiento (Discrete PPO — 12M timesteps)
+### Curva de Entrenamiento (Discrete PPO — 30M timesteps)
 
 <p align="center">
   <img src="results/plot_from_tensorboard/plots/final_discrete_ppo_training.png" width="700" alt="Curva de entrenamiento PPO discreto"/>
